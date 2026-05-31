@@ -30,8 +30,8 @@ def _show_help() -> None:
 def _do_store(text: str, cfg: Config, client: Client) -> None:
     with console.status("[cyan]Saving...[/cyan]"):
         embedding = embeddings.embed(text, cfg, task_type="RETRIEVAL_DOCUMENT")
-        mem_id = store.add_memory(client, text, embedding, cfg.user_id)
-    console.print(f"[green]Saved.[/green] [dim](id: {mem_id})[/dim]")
+        row = store.add_memory(client, text, embedding, cfg.user_id)
+    console.print(f"[green]Saved.[/green] [dim](id: {row['id']})[/dim]")
 
 
 def _do_query(text: str, cfg: Config, client: Client) -> None:

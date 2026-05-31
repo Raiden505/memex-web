@@ -8,12 +8,12 @@ def get_client(cfg: Config) -> Client:
     return create_client(cfg.supabase_url, cfg.supabase_key)
 
 
-def add_memory(client: Client, content: str, embedding: list[float] | None, user_id: str) -> str:
+def add_memory(client: Client, content: str, embedding: list[float] | None, user_id: str) -> dict:
     row: dict = {"content": content, "user_id": user_id}
     if embedding is not None:
         row["embedding"] = embedding
     result = client.table("memories").insert(row).execute()
-    return result.data[0]["id"]
+    return result.data[0]
 
 
 def list_memories(client: Client, user_id: str) -> list[Memory]:

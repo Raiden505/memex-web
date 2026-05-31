@@ -81,7 +81,7 @@ web/                               # Phase 7 — Next.js project (App Router, Ty
     api.ts                         # typed wrapper for all FastAPI calls
   types/
     index.ts
-  middleware.ts                     # Supabase session refresh + route protection
+  proxy.ts                         # Supabase session refresh + route protection (Next.js 16)
   tailwind.config.ts
   next.config.ts
   .env.local.example
@@ -121,7 +121,7 @@ Terminal       → direct module calls →  Supabase + Gemini
 
 ## Current phase
 
-**Phase 4** — complete. Adopted `PRD-v2.md` / `TDD-v2.md` plan. Phase 5 (Auth) is up next, followed by Phase 6 (FastAPI), Phase 7 (Next.js), Phase 8 (Streaming + hardening).
+**Phase 7** — complete. Next.js web app built and compiling. Phase 8 (Streaming + hardening) is up next.
 
 ## CLI output
 
@@ -141,7 +141,7 @@ Uses `rich` (Console, Table, Panel, status spinner) for all output. Do not use r
 - **Next.js App Router only.** No `pages/` directory. All routes under `app/`.
 - **TypeScript throughout.** No `.js` files in `web/`. Define shared types in `types/index.ts`.
 - **State management.** Chat page uses `useState` locally. No Redux, Zustand, or React Context needed at this scale.
-- **Auth flow.** Supabase JS sets cookies via `@supabase/ssr`. `middleware.ts` refreshes sessions. `chat/layout.tsx` does a server-side session check to prevent UI flash.
+- **Auth flow.** Supabase JS sets cookies via `@supabase/ssr`. `proxy.ts` refreshes sessions. `chat/layout.tsx` does a server-side session check to prevent UI flash.
 - **Streaming (Phase 8).** Use Fetch API `ReadableStream` reader to consume SSE. Append chunks to the last assistant message in state; do not create a new message per chunk.
 - **CSS.** Tailwind for layout/utilities; custom properties from `PRD-v2.md §6.2` for the palette. `globals.css` holds the `:root` and `[data-theme="dark"]` blocks verbatim.
 - **Mobile.** Test on real devices, not just Chrome DevTools. The `100dvh` layout must account for the virtual keyboard.

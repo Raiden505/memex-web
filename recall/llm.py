@@ -1,3 +1,5 @@
+from collections.abc import Generator
+
 from google import genai
 from google.genai import types
 
@@ -35,6 +37,31 @@ def synthesize_answer(question: str, memories: list[SearchResult], cfg: Config) 
         ),
     )
     return response.text.strip()
+
+
+def synthesize_answer_stream(question: str, memories: list[SearchResult], cfg: Config) -> Generator[str, None, None]:
+    if not memories:
+        yield _NO_MEMORIES
+        return
+
+    memory_lines = "\n".join(
+        f"{i + 1}. [{r.created_at[:10]}] {r.content}"
+        for i, r in enumerate(memories)
+    )
+    user_message = f"Memories:\n{memory_lines}\n\nQuestion: {question}"
+
+    client = genai.Client(api_key=cfg.gemini_api_key)
+    response = client.models.generate_content_stream(
+        model=cfg.chat_model,
+        contents=user_message,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_PROMPT,
+            temperature=0.2,
+        ),
+    )
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
 
 
 _INTENT_SYSTEM = (

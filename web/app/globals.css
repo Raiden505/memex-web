@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/* ─── Stitch Design — exact color palette & utilities ──────────────────── */
+
+@theme inline {
+  --color-surface:                    #f8f9fa;
+  --color-surface-dim:                #d9dadb;
+  --color-surface-variant:            #e1e3e4;
+  --color-surface-container:          #edeeef;
+  --color-surface-container-low:      #f3f4f5;
+  --color-surface-container-lowest:   #ffffff;
+  --color-surface-container-high:     #e7e8e9;
+  --color-surface-container-highest:  #e1e3e4;
+  --color-background:                   #f8f9fa;
+
+  --color-primary:                    #00236f;
+  --color-on-primary:                 #ffffff;
+  --color-primary-container:          #1e3a8a;
+  --color-primary-fixed:              #dce1ff;
+  --color-primary-fixed-dim:          #b6c4ff;
+  --color-on-primary-container:       #90a8ff;
+
+  --color-secondary:                  #416656;
+  --color-on-secondary:               #ffffff;
+  --color-secondary-container:        #c3ecd7;
+  --color-secondary-fixed:            #c3ecd7;
+  --color-secondary-fixed-dim:        #a8cfbc;
+  --color-on-secondary-container:     #476c5b;
+
+  --color-tertiary:                   #0d0097;
+  --color-on-tertiary:                #ffffff;
+  --color-tertiary-container:         #2724b8;
+  --color-on-tertiary-container:      #a1a4ff;
+  --color-tertiary-fixed:             #e1e0ff;
+  --color-tertiary-fixed-dim:         #c0c1ff;
+
+  --color-error:                      #ba1a1a;
+  --color-on-error:                   #ffffff;
+
+  --color-on-surface:                 #191c1d;
+  --color-on-surface-variant:         #444651;
+
+  --color-outline:                    #757682;
+  --color-outline-variant:            #c5c5d3;
+
+  --color-inverse-primary:            #b6c4ff;
+
+  /* Fonts */
+  --font-headline-lg:   var(--font-manrope);
+  --font-headline-md:   var(--font-manrope);
+  --font-body-md:       var(--font-inter);
+  --font-body-lg:       var(--font-inter);
+  --font-metadata:      var(--font-inter);
+  --font-label-md:      var(--font-jetbrains);
+
+  /* Spacing */
+  --spacing-gutter:       24px;
+  --spacing-container-max: 800px;
+  --spacing-base:         8px;
+  --spacing-message-gap:  12px;
+  --spacing-sidebar-width: 280px;
+}
+
+/* ─── Stitch custom CSS ─────────────────────────────────────────────────── */
+
+body {
+  background-color: #f8f9fa;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(220, 225, 255, 0.3) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(195, 236, 215, 0.2) 0px, transparent 50%);
+  min-height: 100vh;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 0.5px solid #E5E7EB;
+}
+
+.mode-toggle-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-glow {
+  box-shadow: 0 0 40px -10px rgba(39, 36, 184, 0.15);
+}
+
+.glass-header {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.chat-container {
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e1e3e4; border-radius: 10px; }
+
+.input-pill {
+  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.05);
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.message-enter { animation: message-in 200ms ease-out both; }
