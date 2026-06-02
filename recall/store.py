@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from supabase import Client, create_client
 
 from recall.config import Config
@@ -64,3 +66,18 @@ def search_memories(
         )
         for row in result.data
     ]
+
+
+def list_memories_in_range(
+    client: Client, user_id: str, start: datetime, end: datetime
+) -> list[Memory]:
+    result = (
+        client.table("memories")
+        .select("id, content, created_at, user_id")
+        .eq("user_id", user_id)
+        .gte("created_at", start.isoformat())
+        .lt("created_at", end.isoformat())
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return [Memory(**row) for row in result.data]

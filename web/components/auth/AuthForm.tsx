@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Icon from "@/components/ui/Icon";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function AuthForm() {
   const router = useRouter();
@@ -17,6 +19,10 @@ export default function AuthForm() {
   const [passwordError, setPasswordError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/health`, { mode: "no-cors" }).catch(() => {});
+  }, []);
 
   const clearErrors = () => { setEmailError(""); setPasswordError(""); setNotice(""); };
 

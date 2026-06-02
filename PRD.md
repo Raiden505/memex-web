@@ -1,20 +1,30 @@
-# Product Requirements Document — "Recall" (working title)
+# Product Requirements Document — "Recall" / "Memex"
 
-**A personal memory CLI: tell it things, ask it later.**
+**A personal memory app: tell it things, ask it later. CLI + web.**
 
-Version: 1.0
-Scope of this document: CLI client only. No web or mobile apps in this build.
-Companion document: `TDD.md` (technical design).
+Version: 3.0 (consolidated — supersedes the original CLI-only v1)
+This document folds in the web/multi-client scope from `PRD-v2.md` and the conversational
+/ temporal / UX features from `PRD-v3.md`, so it is the single current product spec.
+Companion document: `TDD.md`. Detailed v2/v3 specs remain in `PRD-v2.md` / `PRD-v3.md`.
+
+> **Naming note.** The working title is *Recall*; the shipped web client is branded
+> **Memex**. Same product.
 
 ---
 
 ## 1. Overview
 
-Recall is a command-line app that acts as a personal "second brain." You tell it
-things in plain language — facts, ideas, tasks, things people told you — and it
-saves them. Later you ask it questions in plain language and it answers using
-what you told it. Under the hood it is a small RAG (retrieval-augmented
-generation) system over your own notes.
+Recall/Memex is a personal "second brain." You tell it things in plain language — facts,
+ideas, tasks, things people told you — and it saves them. Later you ask questions in plain
+language and it answers from what you told it. Under the hood it is a small RAG
+(retrieval-augmented generation) system over your own notes, backed by the cloud so the
+same account works from multiple devices.
+
+It now ships as **two clients sharing one backend**:
+- a **CLI** (terminal REPL), and
+- a **web app** (browser chat),
+
+both reading and writing the same Supabase account.
 
 Example session:
 
@@ -24,45 +34,52 @@ bot › got it, I'll remember that.
 
 you › where did I hear about jackets?
 bot › Your friend mentioned there are some great jackets in Islamabad.
+
+you › hi
+bot › Hey — tell me something and I'll remember it.
+
+you › what did I tell you today?
+bot › Today you saved: the jacket tip from your friend.
 ```
+
+---
 
 ## 2. Problem statement
 
-People constantly accumulate small pieces of information — ideas, reminders,
-things they were told — and lose them. Notes apps require you to organize and
-then remember where you filed things. Recall removes the organizing step: you
-dump information in naturally and retrieve it by *asking*, not by searching folders.
+People constantly accumulate small pieces of information and lose them. Notes apps require
+you to organise, then remember where you filed things. Recall removes the organising step:
+you dump information in naturally and retrieve it by *asking*, not by searching folders.
+It should also behave like a real assistant — handle a greeting or a general question
+without choking — and understand time ("what did I tell you today?").
+
+---
 
 ## 3. Goals and non-goals
 
 ### Goals
-- Capture a memory from a single natural-language sentence, with zero ceremony.
+- Capture a memory from a single natural-language sentence, zero ceremony.
 - Retrieve memories by asking natural-language questions.
-- Run on a completely free stack (free-tier cloud services, no paid plans required).
-- Be architected so it can later sync across multiple devices **without a rewrite**,
-  even though only a CLI ships now.
+- True multi-device: CLI at the terminal, web from any browser, same memories.
+- Handle greetings and general questions conversationally without polluting the store.
+- Answer time-scoped questions ("today", "this week", "yesterday").
+- A web UI that looks like a considered product, not a generic AI chatbot.
+- Run on a completely free stack.
 
-### Non-goals (for this build)
-- No web app, no mobile app, no GUI. CLI only.
-- No multi-user product launch. The architecture is multi-user *ready*, but the
-  shipped CLI is for a single owner.
-- No rich note organization (folders, manual tags). Retrieval is by meaning.
-- No real-time collaboration or sharing between people.
+### Non-goals
+- No native mobile app (the web app is responsive and covers mobile).
+- No multi-user product / sharing between accounts.
+- No rich note organisation (folders, tags). Retrieval is by meaning or by time.
+- No real-time collaboration.
+- Not a general-purpose chatbot — it is a memory tool that is polite about non-memory
+  input, not a replacement for a general assistant.
+- No multi-turn conversational memory of the chat session itself (future scope).
 
-## 4. Target user
+---
 
-The builder (you), for personal use, on your own machine. Single account.
-Everything is designed so "add a phone app later, signed into the same account"
-is a future feature, not a redesign.
+## 4. Products
 
-## 5. The interaction model
-
-Two ways to interact, both available at all times:
-
-1. **Natural language (the default magic).** You just type. The app decides
-   whether you are *storing* something or *asking* something and acts accordingly.
-2. **Explicit slash commands (the manual override).** For when you want precise
-   control or the auto-detection guesses wrong.
+### 4.1 CLI (complete)
+A terminal REPL. Plain text in, plain text out, plus slash-command overrides.
 
 | Command          | Purpose                                          |
 |------------------|--------------------------------------------------|
@@ -72,99 +89,142 @@ Two ways to interact, both available at all times:
 | `/list`          | Show all stored memories with their ids          |
 | `/forget <id>`   | Delete a memory by id                            |
 | `/count`         | How many memories are stored                     |
+| `/logout`        | Sign out and clear the local session             |
 | `/help`          | Show help                                        |
 | `/quit`          | Exit                                             |
 
+### 4.2 Web app
+A browser-based chat. Login/signup → a single full-screen chat view. No dashboards, no
+sidebars, no settings panels. No slash commands — the interface is purpose-built.
+
+---
+
+## 5. Interaction model
+
+Both clients use the same intent model. Free-text input is automatically classified and
+handled; the CLI additionally offers slash-command overrides.
+
+Three intents:
+
+| Intent    | Meaning                                                            | Result                                                |
+|-----------|--------------------------------------------------------------------|-------------------------------------------------------|
+| **store** | Telling Memex something to remember.                               | Embed + save.                                         |
+| **query** | Recalling something **personal** you told it (optionally time-scoped). | Semantic search (or a date-window listing) + grounded answer. |
+| **general** | A greeting, small talk, general-knowledge question, or "what can you do?". | Answered conversationally by Gemini; not saved, not memory-grounded. |
+
+The web app has **two screens only**:
+
+- **Auth.** Centred form with brand mark, email/password, sign-in/sign-up toggle.
+- **Chat.** Full-screen conversation: messages fill the vertical space, input anchored at
+  the bottom, a minimal sign-out link in the top corner. Nothing else.
+
+---
+
 ## 6. Functional requirements
 
-- **FR1** — Store: the app saves a memory (its text + a timestamp) to durable
-  cloud storage. Memories survive restarts and machine changes.
-- **FR2** — Retrieve: given a question, the app finds the most semantically
-  relevant stored memories and produces a natural-language answer grounded only
-  in those memories.
-- **FR3** — No-hallucination rule: if nothing relevant is stored, the app says so
-  rather than inventing an answer.
-- **FR4** — Intent routing: free-text input is classified as *store* or *query*
-  and handled automatically, with slash commands as an override.
-- **FR5** — Manage: the user can list, count, and delete memories.
-- **FR6** — Resilience: external service failures (LLM/DB/network) produce a clear
-  message, never an unhandled crash.
-- **FR7** — Multi-device readiness: every memory is associated with an account so
-  a future second client signed into the same account sees the same memories.
+- **FR1 — Store.** Save a memory (text + timestamp) to durable cloud storage; survives
+  restarts and machine changes.
+- **FR2 — Retrieve.** Given a question, find the most semantically relevant memories and
+  answer grounded only in those memories.
+- **FR3 — No-hallucination (personal).** If nothing relevant is stored for a personal
+  recall, say so rather than inventing. Never fabricate a personal fact.
+- **FR4 — Intent routing.** Classify free-text as store / query / general and handle
+  automatically; slash commands override (CLI).
+- **FR5 — Manage.** List, count, and delete memories.
+- **FR6 — Resilience.** External failures (LLM/DB/network) produce a clear message, never
+  an unhandled crash.
+- **FR7 — Multi-device.** Every memory is tied to an account; any client signed into the
+  same account sees the same memories.
+- **FR8 — Conversational range.** Greetings and general questions get a short, in-character
+  Gemini reply; they are not stored and never claim to be from saved memories.
+- **FR9 — Temporal recall.** Answer time-scoped questions ("today", "yesterday", "this
+  week", "last N days") from memories created in that window, in the user's local day.
+- **FR10 — Web responsiveness.** After a reply the cursor returns to the input; the user
+  can type while a reply is in flight (but not send); login lands in the chat quickly.
 
-## 7. Constraints
+---
 
-- **Free tier only.** LLM and embeddings via Google Gemini's free tier; database
-  via Supabase's free tier. No service requires a paid plan to run this build.
-- **Free-tier rate limits exist.** The Gemini free tier is generous for personal
-  use (well over a thousand requests/day) but is not unlimited; the app must
-  degrade gracefully when limited.
-- **Privacy caveat.** On the Gemini free tier, prompts may be used by the provider
-  for training. This is acceptable for this build but should be surfaced to the
-  user in the README. (A future privacy mode could self-host embeddings.)
-- **Free-tier quotas change over time.** Exact limits and model names must be
-  confirmed against current provider docs during implementation, not assumed.
+## 7. No-hallucination rule (authoritative)
 
-## 8. Phased delivery plan (product view)
+> Memex must never invent a **personal memory**. A personal-recall (`query`) with no
+> matching results returns the fixed "nothing saved" message — no model guess. Messages
+> classified `general` (greetings, small talk, general-knowledge questions) are answered
+> by Gemini and are never presented as something the user previously stored. Temporal
+> answers are built only from memories actually found in the requested window.
 
-Development is split into phases. **Each phase ends in something you can test by
-hand.** The acceptance check is what *you* run to confirm the phase is done.
-Technical tasks for each phase live in `TDD.md` under the matching phase number.
+---
 
-### Phase 0 — Skeleton
-The app exists and runs, but does nothing intelligent yet.
-- **Acceptance:** `python -m recall` launches to a prompt; `/help` lists the
-  commands; `/quit` exits cleanly; running it with missing configuration prints a
-  clear, friendly "here's what to set up" message instead of a stack trace.
+## 8. Design philosophy (web)
 
-### Phase 1 — Cloud storage (no AI yet)
-Memories are saved to and read from the cloud database using explicit commands.
-- **Acceptance:** `/add buy milk` saves a note; the row is visibly present in the
-  Supabase dashboard; `/list` shows it with an id; `/count` reports the right
-  number; `/forget <id>` removes it; everything persists after quitting and
-  relaunching.
+A tool that feels like a well-made physical object — sparse, typographically considered,
+warm, fast and direct. Avoid the ChatGPT/Claude aesthetic, gradient hero sections, glassy
+over-rounded cards, typing-indicator animations, assistant avatars, and over-animated
+transitions.
 
-### Phase 2 — Semantic search
-The app can find memories by meaning, not exact words.
-- **Acceptance:** after adding several different notes, `/search` with *different
-  wording* than the original note still surfaces the right note(s), ranked with
-  the most relevant first.
+> The detailed visual spec lives in `PRD-v2.md §6` (the original parchment/Lora system).
+> **As shipped, the web client is branded "Memex" and uses a Material-3-derived design**
+> (Manrope / Inter type, generated from a Stitch reference — see `MEMORY.md`). Where the
+> implementation and `PRD-v2.md §6` differ, the implementation is the current truth; v3
+> introduces no visual redesign, only behavioural/UX changes (§ FR10).
 
-### Phase 3 — Answers (RAG complete)
-The app turns retrieved memories into a natural answer.
-- **Acceptance:** `/ask where did I hear about jackets` returns a coherent
-  sentence built from your stored notes; `/ask` about something you never stored
-  replies that it has nothing saved, rather than making something up.
+---
 
-### Phase 4 — Auto intent (the magic)
-No more needing `/add` vs `/ask` — plain text just works.
-- **Acceptance:** typing a statement stores it; typing a question answers it; the
-  tricky cases route correctly, e.g. "remind me to call mom" is *stored* as a task
-  while "remind me where I parked" is treated as a *question*. Slash commands still
-  work as overrides.
+## 9. Phased delivery plan
 
-### Phase 5 — Accounts & multi-device readiness (still CLI)
-Memories are tied to a login, proving the multi-device foundation.
-- **Acceptance:** you log in; your notes are tied to your account and persist; a
-  fresh login session (simulating a second device) signed into the same account
-  sees the same notes; a different account sees none of yours.
+Each phase ends in a manual Definition of Done; do not start one until the previous passes.
+**Phases 0–8 are complete** (code complete; some live DoD checks pending — see `MEMORY.md`).
 
-### Phase 6 — Hardening (optional polish)
-Graceful behavior under failure.
-- **Acceptance:** simulating a rate limit or a network drop produces a friendly
-  message and/or an automatic retry or fallback, never a crash.
+| Phase | Name | Status | Acceptance (summary) |
+|-------|------|--------|----------------------|
+| 0 | Skeleton | ✅ | `python -m recall` launches; `/help`, `/quit`; friendly missing-config message. |
+| 1 | Cloud storage (no AI) | ✅ | `/add` saves; `/list`/`/count`/`/forget` work; persists across restarts. |
+| 2 | Semantic search | ✅ | `/search` with different wording surfaces the right notes, ranked. |
+| 3 | Answers (RAG) | ✅ | `/ask` gives a grounded answer; unknown → "nothing saved", no invention. |
+| 4 | Auto intent | ✅ | Bare statements store, bare questions answer; "remind me to call mom" stores, "remind me where I parked" queries. |
+| 5 | Accounts & multi-device | ✅ | Login ties memories to an account; a second session sees them; another account sees none. |
+| 6 | FastAPI backend | ✅ | Authenticated `/memories` CRUD + `/chat` over HTTP with a real Supabase JWT; CLI unchanged. |
+| 7 | Next.js web app | ✅ | Sign in, store from the web, ask and get a correct answer incl. CLI-stored memories; works desktop + mobile. |
+| 8 | Streaming + hardening | ✅ | Responses stream in; network drop / rate limit shows an inline error, not a crash. |
+| 9 | Conversational range (GENERAL) | ▶ next | Greetings/general questions get a short reply and are **not** saved; personal-recall misses still say "nothing saved". |
+| 10 | Temporal recall | ⬜ | "what did I tell you today/this week/yesterday" returns the right window in the user's local day. |
+| 11 | Web UX refinements | ⬜ | Cursor returns to input; type-while-loading (no send); fast login → chat. |
 
-## 9. Success metrics
+Full per-phase Definitions of Done: phases 0–4 in `TDD.md`, 5–8 in `TDD-v2.md`, 9–11 in
+`TDD-v3.md`.
 
-- A natural-language question about something you stored returns the correct,
-  grounded answer the large majority of the time.
+---
+
+## 10. Constraints
+
+- **Free tier only:** Vercel (Next.js), Railway/Render (FastAPI), Supabase, Gemini. No
+  paid plans. *(For v3 work, hosting cost/scale is explicitly out of scope per the project
+  owner — UX latency is in scope, infrastructure cost is not.)*
+- **Embedding dimension locked at 768.** The model output and the `vector(768)` column
+  must agree; never change the model without re-embedding every row.
+- **Privacy caveat.** The Gemini free tier may use prompts for training — acceptable for
+  personal use, noted in the README.
+- Free-tier rate limits and model identifiers must be confirmed against current docs at
+  build time.
+
+---
+
+## 11. Success metrics
+
+- A natural-language question about stored content returns the correct, grounded answer
+  the large majority of the time.
 - Capturing a memory takes one line of typing and no decisions.
+- Greetings and general questions feel natural, never produce a "nothing saved" dead-end,
+  and never invent a personal fact.
 - The app runs for a month of personal use at $0.
 
-## 10. Future scope (explicitly out of this build)
+---
 
-- A web client and a mobile client signed into the same account (the reason the
-  architecture is cloud-backed and account-scoped from the start).
-- LLM-extracted tags/categories and filtering by them.
-- Parsing relative dates ("later today", "tomorrow") into real reminder dates.
-- A privacy mode that keeps stored text out of any third-party training data.
+## 12. Future scope
+
+- Manual dark/light toggle.
+- Memory management view (browse, edit, search, delete from the web UI).
+- Dedup of near-identical memories; source attribution in answers.
+- Multi-turn conversational context within a session.
+- Topical + temporal combined queries as a first-class feature.
+- Native mobile app using the same FastAPI backend.
+- A privacy mode that keeps stored text out of third-party training data.

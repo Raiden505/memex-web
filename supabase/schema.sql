@@ -18,6 +18,10 @@ create table if not exists memories (
 create index if not exists memories_embedding_idx
   on memories using hnsw (embedding vector_cosine_ops);
 
+-- 3b. Temporal recall index (Phase 10)
+create index if not exists memories_user_created_idx
+  on memories (user_id, created_at desc);
+
 -- 4. RPC for semantic search — called by store.search_memories()
 create or replace function match_memories(
   query_embedding vector(768),

@@ -121,7 +121,7 @@ Terminal       → direct module calls →  Supabase + Gemini
 
 ## Current phase
 
-**Phase 7** — complete. Next.js web app built and compiling. Phase 8 (Streaming + hardening) is up next.
+**Phase 11** — complete. All phases 0–11 implemented.
 
 ## CLI output
 

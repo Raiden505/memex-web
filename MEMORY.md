@@ -7,9 +7,10 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 8 — Streaming + hardening complete. Build + lint clean.
-- **Last worked on:** 2026-05-31
-- **Last agent action:** Phase 8 implemented — SSE streaming from FastAPI to Next.js with retry fallback. Backend chat router supports `?stream=true` returning `text/event-stream`. Frontend `postChatStream()` reads `ReadableStream`, parses SSE chunks, retries once on failure. Chat page tries streaming first, falls back to non-streaming `postChat()` on error, then shows inline error as last resort. Fixed chat.py router name shadowing (renamed FastAPI router to `chat_router`).
+- **Phase:** 11 code complete. All phases 0–11 implemented.
+- **Last worked on:** 2026-06-02
+- **Last agent action:** Phase 11 implemented — Web UX refinements. ChatInput now uses `forwardRef` + `useImperativeHandle`, textarea never disabled (typing always works), send gated via `loading` check in Enter handler + `disabled={!hasText || loading}` on button. Chat page refocuses input after reply (guarded by `matchMedia('(pointer: fine)')`). Auth page fires fire-and-forget `GET /health` on mount to warm backend.
+- **Prior agent action:** Phase 10 implemented — Temporal recall.
 
 ---
 
@@ -26,6 +27,9 @@ Read this before touching any code. Write to it after every change.
 | 6     | FastAPI backend             | code complete | /memories CRUD + /chat endpoint behind JWT auth; Procfile for Railway |
 | 7     | Next.js web app             | code complete | chat interface + auth pages + design system; build passes, lint clean |
 | 8     | Streaming + hardening       | code complete | SSE streaming in FastAPI + Next.js; retry with non-streaming fallback; inline error display |
+| 9     | Conversational range (GENERAL) | code complete | `Intent` += "general"; router greeting/meta fast-path + 3-way classifier; `llm.chat_general(_stream)`; CLI + FastAPI general branch; optional `source` field. Personal-recall miss stays strict. |
+| 10    | Temporal recall             | code complete | `temporal.extract_range`, `store.list_memories_in_range`, `llm.summarize_window(_stream)`, optional `tz` on `/chat`, `memories_user_created_idx` index. |
+| 11    | Web UX refinements          | code complete | refocus input after reply (desktop only); type-while-loading (send gated); optimistic chat shell + `/health` warm-up from auth page. |
 
 ---
 
@@ -45,6 +49,10 @@ Fill these in once confirmed against official docs before writing integration co
 
 | Date       | Decision | Reason |
 |------------|----------|--------|
+| 2026-06-02 | v3 fallback rule: add a 3rd `GENERAL` intent for greetings/general-knowledge (always answered by Gemini); personal-recall (`query`) misses still return the fixed "nothing saved" — Gemini never invents personal facts | User choice. Greetings/general are classified up front and never hit the DB, which keeps the no-hallucination guarantee intact for personal facts while still handling non-memory input gracefully |
+| 2026-06-02 | Consolidated all spec into `PRD.md` / `TDD.md` (v1+v2+v3, phases 0–11); kept `PRD-v2/TDD-v2` + new `PRD-v3/TDD-v3` as detailed references | User asked to amend v2 + new v3 into the original docs; originals are now the single current source, version docs hold per-phase detail |
+| 2026-06-02 | Temporal recall via `created_at` btree index + `list_memories_in_range`, not a new RPC/schema column; tz passed from the web client (`Intl…timeZone`) | "today" must mean the user's local day; a filtered select on an indexed column is enough, no vector change needed |
+| 2026-06-02 | Docs reflect shipped reality: app branded **Memex**, Material-3/Manrope-Inter design (Stitch), not PRD-v2 §6 parchment/Lora; v3 is behavioural/UX only, no visual redesign | Implementation diverged from PRD-v2 §6 in the Phase 7 rebuild; docs should not contradict the codebase |
 | 2026-05-31 | Phase 5: `cfg.user_id` mutated after login in `main()` | Cleanest way to thread the authenticated UUID through all existing store calls without changing any function signatures |
 | 2026-05-31 | Session saved to `~/.recall/session.json` (not inside the project dir) | Keeps credentials out of the repo entirely; works cross-platform via `Path.home()` |
 | 2026-05-31 | Adopted PRD-v2/TDD-v2 multi-client plan | CLI + web app sharing one backend; phases 5-8 re-activated from deferred state |
@@ -63,12 +71,49 @@ Fill these in once confirmed against official docs before writing integration co
 - **[ACTION for Phase 1 DoD]** Fill in real `SUPABASE_URL` and `SUPABASE_KEY` (service_role) in `.env`, then run `supabase/schema.sql` in the Supabase SQL editor. After that, test: `/add buy milk` → id appears; `/list` shows it; `/count` correct; `/forget <id>` removes it; quit+relaunch persists.
 - **[ACTION for Phase 2 DoD]** Add `GEMINI_API_KEY` and set `EMBED_MODEL=gemini-embedding-001` in `.env`. Add a few distinct memories with `/add`, then test `/search` with different wording — right notes should surface with sensible similarity scores.
 - Confirm Supabase free-tier inactivity-pause behavior before relying on long-idle persistence.
+- **[v3 / Phase 9 design] Decided: `?`-ending input removed from heuristic; all `?`-ending text goes to the 3-way classifier (option a from `TDD-v3.md §3.2`). Query-starter words + "did/do/have i" prefixes still short-circuit to QUERY.
+- **[v3 / Phase 10] Done.** `tzdata` added to `requirements.txt`. `ZoneInfo` works with system timezone database on Windows and Linux. Railway/Render Linux images include `tzdata`; the pip package provides a fallback.
 
 ---
 
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-02 — Phase 11 implemented
+- **`web/components/chat/ChatInput.tsx`** — converted to `forwardRef` with `useImperativeHandle` exposing `focus()`. Removed `disabled` from the `<input>` element entirely — user can always type. Enter handler gates on `loading`: `if (!loading && value.trim()) onSend()`. Send button uses `disabled={!hasText || loading}`. Changed `disabled` prop to `loading`.
+- **`web/app/chat/page.tsx`** — holds `inputRef` via `useRef<ChatInputHandle>`. In `handleSend`'s `finally` block, after `setLoading(false)`, refocuses input via `inputRef.current?.focus()` guarded by `matchMedia('(pointer: fine)').matches` to avoid forcing mobile keyboards open. Passes `loading` prop instead of `disabled` to ChatInput.
+- **`web/components/auth/AuthForm.tsx`** — added `useEffect` on mount that fires a fire-and-forget `fetch('${API_URL}/health', { mode: 'no-cors' })` to warm a sleeping free-tier backend while the user is authenticating. No other changes to auth flow.
+- Build + lint clean. Phase 11 code complete.
+
+### 2026-06-02 — Phase 10 implemented
+- **`recall/temporal.py`** (new) — `extract_range(text, tz, now)`: heuristic-based time-range extraction. Supports "today" (midnight→now), "yesterday" (midnight yesterday→midnight today), "this week" (Monday→now), "last N days"/"past N days", ISO dates `YYYY-MM-DD`, and weekday names ("Monday"/"mon"). All boundaries computed in the supplied `tz` then converted to UTC for DB queries. Vague phrases ("recently") → `None`. Testable via the `now` parameter.
+- **`recall/store.py`** — `list_memories_in_range(client, user_id, start, end)` → `list[Memory]`: selects memories where `user_id` matches and `created_at >= start` and `< end`, ordered ascending by `created_at`.
+- **`recall/llm.py`** — `summarize_window(memories, label, cfg)` and `summarize_window_stream(...)`: empty list → `f"Nothing saved {label}."` (no LLM call). Otherwise passes timestamped items with a system prompt to list/summarize using only the items given. Temperature 0.2.
+- **`recall/cli.py`** — `_do_query` now tries `temporal.extract_range` first (using machine local tz). If range found → `list_memories_in_range` → `summarize_window`. Otherwise falls through to existing semantic search path.
+- **`api/routers/chat.py`** — `ChatRequest` gains optional `tz: str | None`. Extracted `_handle_query` helper for the non-streaming path. Both streaming and non-streaming query branches check temporal range before falling through to semantic search. `source` now also detects "Nothing saved" prefix for temporal empty results.
+- **`web/lib/api.ts`** — `postChat` and `postChatStream` now include `tz: Intl.DateTimeFormat().resolvedOptions().timeZone` in the request body.
+- **`supabase/schema.sql`** — new `memories_user_created_idx` btree index on `(user_id, created_at desc)`.
+- **`requirements.txt`** — added `tzdata>=2024.1` for Linux deploy targets.
+- Build + lint clean. `extract_range` verified with quick test. Phase 10 code complete.
+
+### 2026-06-02 — Phase 9 implemented
+- **`recall/models.py`** — `Intent` now `Literal["store", "query", "general"]`.
+- **`recall/router.py`** — greeting/meta fast-path (bare "hi"/"hello"/"thanks"/"help" etc.) returns `"general"` with no LLM call. Removed `?`-ending heuristic — option (a) from `TDD-v3.md §3.2`: `?`-ending input now goes to the 3-way classifier which separates personal-recall from general-knowledge questions. Query-starter words and "did/do/have i" prefixes still short-circuit to `"query"`. All other ambiguous input → 3-way `classify_intent`; default to `"store"` on failure.
+- **`recall/llm.py`** — `classify_intent` prompt extended to 3 classes (STORE/QUERY/GENERAL). Parsing maps reply → one of three; defaults to `"store"` on any failure. Added `chat_general(message, cfg)` (temperature 0.4, persona prompt) and `chat_general_stream(message, cfg)`.
+- **`recall/cli.py`** — bare-text dispatch now handles `"general"` intent: calls `llm.chat_general(text, cfg)` with spinner; does not embed, store, or search.
+- **`api/routers/chat.py`** — `ChatResponse` gains optional `source` field (`"memory"` / `"general"` / `"none"`). Both streaming and non-streaming paths branch on `"general"` intent. Query path now sets `source` explicitly.
+- **`web/lib/api.ts`** — `postChat` return type updated to include `source: string | null`.
+- **Design decision recorded:** `?`-heuristic removed. "what's the capital of France?" → 3-way classifier → GENERAL → answered by Gemini. "where did I park?" → query-starter heuristic → QUERY → semantic search. Personal-recall empty-result short-circuit in `synthesize_answer` is unchanged.
+- Build + lint clean. Phase 9 code complete.
+
+### 2026-06-02 — v3 planning (docs only, no code)
+- Analysed `PRD.md`/`PRD-v2.md`/`TDD.md`/`TDD-v2.md` and current code (`router.py`, `llm.py`, `api/routers/chat.py`, `models.py`) to ground the v3 design in how the app actually works (two-way `Intent`, strict `_NO_MEMORIES` short-circuit).
+- **Created `PRD-v3.md`** — product spec for three features: (1) conversational range via a new `general` intent answered by Gemini, with personal-recall staying strict; (2) temporal recall ("what did I tell you today/this week/yesterday"); (3) web UX refinements (refocus input, type-while-loading, fast login→chat). Phases 9–11 with DoDs.
+- **Created `TDD-v3.md`** — technical design: 3-way intent + greeting/meta fast-path in `router.py`, extended 3-class classifier prompt, `llm.chat_general(_stream)` persona handler; `recall/temporal.py` `extract_range`, `store.list_memories_in_range`, `llm.summarize_window(_stream)`, optional `tz` on `/chat`, new `memories_user_created_idx`; frontend changes for the three UX items. Module + API contract deltas, tests, open items.
+- **Rewrote `PRD.md` and `TDD.md`** as consolidated current docs (v1+v2+v3, phases 0–11) — the originals now fold in the web/multi-client architecture and the v3 features; `PRD-v2/TDD-v2/PRD-v3/TDD-v3` retained as detailed references.
+- Noted the design-vs-implementation divergence: docs now state the shipped app is branded **Memex** with the Material-3/Stitch design, and that v3 adds no visual redesign.
+- No source files changed. Next implementation step: Phase 9.
 
 ### 2026-05-31 — Phase 8 implemented
 - **`recall/llm.py`** — added `synthesize_answer_stream()`: uses `client.models.generate_content_stream()` to yield tokens via `Generator[str, None, None]`.

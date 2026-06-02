@@ -45,10 +45,13 @@ export async function getMemories(): Promise<Message[]> {
 
 export async function postChat(
   message: string
-): Promise<{ intent: string; reply: string; id: string | null }> {
+): Promise<{ intent: string; reply: string; id: string | null; source: string | null }> {
   return fetchApi("/chat", {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({
+      message,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
   });
 }
 
@@ -66,7 +69,10 @@ export async function* postChatStream(
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({
+          message,
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
 
       if (!res.ok) {

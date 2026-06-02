@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import type { Message } from "@/types";
 import ChatLayout from "@/components/chat/ChatLayout";
 import MessageList from "@/components/chat/MessageList";
-import ChatInput from "@/components/chat/ChatInput";
+import ChatInput, { type ChatInputHandle } from "@/components/chat/ChatInput";
 import EmptyState from "@/components/chat/EmptyState";
 import { postChat, postChatStream } from "@/lib/api";
 
@@ -12,6 +12,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const inputRef = useRef<ChatInputHandle>(null);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -55,13 +56,16 @@ export default function ChatPage() {
       }
     } finally {
       setLoading(false);
+      if (matchMedia("(pointer: fine)").matches) {
+        inputRef.current?.focus();
+      }
     }
   }, [input, loading]);
 
   return (
     <ChatLayout>
       {messages.length === 0 ? <EmptyState /> : <MessageList messages={messages} />}
-      <ChatInput value={input} onChange={setInput} onSend={handleSend} disabled={loading} />
+      <ChatInput ref={inputRef} value={input} onChange={setInput} onSend={handleSend} loading={loading} />
     </ChatLayout>
   );
 }

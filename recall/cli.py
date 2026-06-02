@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime
 
 from supabase import Client
 from rich.console import Console
@@ -7,7 +8,7 @@ from rich.panel import Panel
 from rich import box
 
 from recall.config import Config, ConfigError, load_config
-from recall import auth, embeddings, llm, router, store
+from recall import auth, embeddings, llm, router, store, temporal
 
 console = Console()
 
@@ -35,11 +36,20 @@ def _do_store(text: str, cfg: Config, client: Client) -> None:
 
 
 def _do_query(text: str, cfg: Config, client: Client) -> None:
+    rng = temporal.extract_range(text, now=datetime.now().astimezone())
+    if rng:
+        start, end, label = rng
+        with console.status(f"[cyan]Scanning {label}...[/cyan]"):
+            mems = store.list_memories_in_range(client, cfg.user_id, start, end)
+            answer = llm.summarize_window(mems, label, cfg)
+        console.print(f"[bold]bot \u203a[/bold] {answer}")
+        return
+
     with console.status("[cyan]Thinking...[/cyan]"):
         embedding = embeddings.embed(text, cfg, task_type="RETRIEVAL_QUERY")
         results = store.search_memories(client, embedding, cfg.user_id, cfg.top_k)
         answer = llm.synthesize_answer(text, results, cfg)
-    console.print(f"[bold]bot ›[/bold] {answer}")
+    console.print(f"[bold]bot \u203a[/bold] {answer}")
 
 
 def _dispatch(line: str, cfg: Config, client: Client) -> bool:
@@ -52,6 +62,10 @@ def _dispatch(line: str, cfg: Config, client: Client) -> bool:
             intent = router.route(line, cfg)
             if intent == "store":
                 _do_store(line, cfg, client)
+            elif intent == "general":
+                with console.status("[cyan]Thinking...[/cyan]"):
+                    reply = llm.chat_general(line, cfg)
+                console.print(f"[bold]bot \u203a[/bold] {reply}")
             else:
                 _do_query(line, cfg, client)
         except Exception as exc:
