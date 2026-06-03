@@ -13,7 +13,7 @@ export default function ForgetConfirm({ candidates, onConfirm, onCancel }: Forge
   const n = candidates.length;
 
   return (
-    <div className="rounded-2xl border border-outline-variant/50 bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
+    <div className="rounded-2xl border border-outline-variant/50 bg-surface-container-lowest p-4 shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
       <p className="font-body-md text-body-md text-on-surface-variant mb-3">
         {n === 1 ? "1 memory will be deleted:" : `${n} memories will be deleted:`}
       </p>

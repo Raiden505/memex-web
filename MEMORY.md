@@ -7,9 +7,9 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 16 complete (natural-language forget). **Next: Phase 17 — Richer chat UI & theme depth.**
+- **Phase:** 19 complete (Memory Library). **Next: Phase 20 — Organisation & reminders.**
 - **Last worked on:** 2026-06-03
-- **Last agent action:** Phase 16 — 4th intent `forget`; router heuristic; 4-way classifier; `store.delete_memories`; two-step confirm in API; `fc` SSE frame; `ForgetConfirm.tsx`; full CLI natural-language forget flow.
+- **Last agent action:** Phase 19 — `/library` route with auth guard; `PATCH /memories/{id}` re-embeds content; `POST /memories/{id}/pin` toggles pinned via `metadata` jsonb; `GET /memories/count`; client-side search + time-window filters; inline edit with textarea + Enter-to-save/Escape-to-cancel; delete with inline yes/no confirm; `RecentMemories` sorts pinned-first; `SettingsMenu` links to `/library`; new icons (`arrow_back`, `edit`, `pin`, `search`).
 - **Prior agent action:** Phase 15 — prompt system centralised in `recall/prompts.py`, `save_ack()` rotation.
 
 ---
@@ -35,9 +35,9 @@ Read this before touching any code. Write to it after every change.
 | 14    | Reliable streaming          | code complete | **root cause fixed:** `api/routers/chat.py` now JSON-encodes SSE frames via `_sse({"t"|"done"|"error"})`; `web/lib/api.ts` splits on `\n\n` event boundaries and `JSON.parse`s each frame. Tokens with newlines survive transport losslessly. |
 | 15    | Personality & prompt system | code complete | `recall/prompts.py` (all prompts + `MEMEX_VOICE` + `SAVE_ACKS`); `llm.save_ack()` replaces fixed "Saved." in CLI + API. No-hallucination short-circuits unchanged. |
 | 16    | Natural-language forget     | code complete | 4th intent `forget`; router heuristic + 4-way classifier; `store.delete_memories`; two-step confirm (`confirm_forget`/`forget_candidates`) in API; `fc` SSE frame captured by `postChatStream`; `ForgetConfirm.tsx`; CLI bare-text forget flow with y/N prompt. |
-| 17    | Richer chat UI & theme depth | planned (docs) | remove standing "TODAY" divider (only between differing dates); welcoming empty state + suggestion chips; `RecentMemories` cards from `getMemories`; elevation/depth tokens. |
-| 18    | Settings menu & dark mode   | planned (docs) | `SettingsMenu` dropdown by logout; **real dark mode = tokenise hardcoded hex** (`AuthForm` `#00236f`, `MessageBubble` `bg-white`); `data-theme` + no-flash script; `web/lib/theme.ts`. |
-| 19    | Memory Library              | planned (docs) | `/library` route; `PATCH /memories/{id}` (re-embed), pin via `metadata.pinned`; browse/search/edit/delete/pin. |
+| 17    | Richer chat UI & theme depth | complete | remove standing "TODAY" divider (only between differing dates); welcoming empty state + suggestion chips; `RecentMemories` cards from `getMemories`; elevation/depth tokens. |
+| 18    | Settings menu & dark mode   | complete | `SettingsMenu` dropdown by logout; **real dark mode = tokenise hardcoded hex** (`AuthForm` `#00236f`, `MessageBubble` `bg-white`); `data-theme` + no-flash script; `web/lib/theme.ts`. |
+| 19    | Memory Library              | complete  | `/library` route; `PATCH /memories/{id}` re-embeds; `POST /memories/{id}/pin`; `GET /memories/count`; client search/filters; inline edit/delete confirm; pinned-first sort. |
 | 20    | Organisation & reminders    | planned (docs) | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
 | 21    | Data ownership & insights   | planned (docs) | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
 | 22    | Capture & reach             | planned (docs) | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
@@ -94,6 +94,55 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-03 — Phase 19 implemented
+- **Backend:**
+  - `recall/models.py` — added optional `metadata` field to `Memory` and `SearchResult` dataclasses.
+  - `recall/store.py` — `list_memories` now selects `metadata`; added `update_memory(mem_id, user_id, content, embedding)`; added `set_pinned(mem_id, user_id, pinned)` writing to `metadata` jsonb; added `search_memories_text(user_id, query)` for server-side substring search (available, library uses client-side).
+  - `api/routers/memories.py` — extended with `PATCH /memories/{id}` (re-embeds via `embeddings.embed` then `store.update_memory`), `POST /memories/{id}/pin` (`store.set_pinned`), `GET /memories/count` (`store.count_memories`). `GET /memories` now returns `metadata` in `MemoryOut`.
+  - `supabase/schema.sql` — `match_memories` RPC now returns `metadata jsonb`; added optional `memories_metadata_idx` GIN index for future metadata queries.
+- **Frontend:**
+  - `web/types/index.ts` — added `metadata?: { pinned?: boolean } | null` to `Message`; new `Memory` interface.
+  - `web/lib/api.ts` — added `getMemoryCount()`, `updateMemory(id, content)`, `deleteMemory(id)`, `setPinned(id, pinned)`. `getMemories` now passes `metadata` through.
+  - `web/components/ui/Icon.tsx` — added `arrow_back`, `edit`, `pin`, `search` SVG icons.
+  - `web/app/library/layout.tsx` — auth guard (same pattern as `/chat`).
+  - `web/app/library/page.tsx` — full Library page: fixed header with back arrow + count badge; search bar + time-window dropdown (All time / Today / Yesterday / This week / Last 7 days / Last 30 days); client-side filtering; list of `MemoryRow` components with pin toggle, inline edit (textarea, Enter-to-save, Escape-to-cancel), inline delete confirm (Yes/No); skeleton loading states; empty state.
+  - `web/components/ui/SettingsMenu.tsx` — Memory Library button now `router.push("/library")` instead of alert placeholder.
+  - `web/components/chat/RecentMemories.tsx` — now sorts `pinned` memories to the top before slicing top-5.
+  - `web/proxy.ts` — matcher includes `/library/:path*`; redirect unauthenticated library requests to `/auth`.
+- Build passes, lint clean.
+
+### 2026-06-03 — Phase 17 re-implemented from scratch
+- Rewrote all Phase 17 files fresh (no diff reuse):
+  - `MessageList.tsx` — message-based iteration with date-change-only dividers.
+  - `EmptyState.tsx` — fetch-first-name from Supabase, branded icon, headline/subtitle, 4 suggestion chips, `onSuggestion` prop.
+  - `RecentMemories.tsx` — fetch `getMemories`, skeleton placeholders, top-5 clickable cards, relative dates, empty-state message.
+  - `TopBar.tsx` — preserved Phase 18 SettingsMenu; `auto_awesome` brand accent next to wordmark.
+  - `chat/page.tsx` — preserved all Phase 16 forget + Phase 18 booting logic; `handleSuggestion` callback wired to `EmptyState`.
+  - `globals.css` — preserved full Phase 18 dark-mode token map; elevation utilities rewritten fresh.
+- Build passes, lint clean.
+
+### 2026-06-03 — Phase 18 implemented
+- **`web/lib/theme.tsx`** (new) — `ThemeProvider` context with `light`/`dark`/`system` support. Initializes from `localStorage` via lazy state initializer (no setState in effects). `resolved` computed via `useMemo` from `resolveTheme()`. Applies `data-theme` attribute to `<html>` in `useEffect`. Listens to `prefers-color-scheme` changes when in `system` mode. `useTheme()` hook exported.
+- **`web/app/providers.tsx`** (new) — client component wrapping `ThemeProvider` around children. Imported by `layout.tsx`.
+- **`web/app/layout.tsx`** — added no-flash inline `<script>` in `<head>` that reads `localStorage.theme` before paint and sets `data-theme` on `<html>` immediately. Prevents FOUC on reload.
+- **`web/app/globals.css`** — added complete `[data-theme="dark"]` override block mapping every semantic color token to a dark Material-3-compatible value. Dark body uses subdued radial gradients. Dark `.glass-panel` uses `rgba(27,30,36,0.7)`. Dark elevation shadows use stronger opacity. All remaining hardcoded hex values removed (glass-panel border now uses `var(--color-outline-variant)`).
+- **`web/components/ui/SettingsMenu.tsx`** (new) — dropdown popover from settings icon in `TopBar`. Contains: segmented theme toggle (Light/Dark/System), signed-in email display, "Memory Library" and "Export my data" placeholder actions (alert for now, wired in Phase 19/21), and an "About Memex" footer with version + privacy caveat. Closes on outside-click and Escape. Keyboard-navigable with `role="menu"`/`role="menuitem"`.
+- **`web/components/ui/Icon.tsx`** — added `sun`, `moon`, `monitor` SVG icons for the theme toggle.
+- **`web/components/ui/TopBar.tsx`** — fetches user email via `supabase.auth.getUser()` on mount. Renders `SettingsMenu` left of the logout button.
+- **`web/components/auth/AuthForm.tsx`** — replaced hardcoded `color: "#00236f"` with `text-primary` Tailwind class. Replaced inline `style={{ color: ... }}` on segmented toggle buttons with conditional `className` using `text-primary` / `text-on-surface-variant`.
+- **`web/components/chat/MessageBubble.tsx`** — replaced `bg-white` with `bg-surface-container-lowest`.
+- **`web/components/chat/ForgetConfirm.tsx`** — replaced `bg-white` with `bg-surface-container-lowest`.
+- Build passes, lint clean. Phase 18 code complete.
+
+### 2026-06-03 — Phase 17 implemented
+- **`web/components/chat/MessageList.tsx`** — rewrote from group-based to message-based iteration. `DateDivider` now only renders when the date label changes from the previous message (`i > 0 && formatDate(msg.date) !== formatDate(messages[i-1].date)`). No more standing "TODAY" chip on single-day sessions.
+- **`web/components/chat/EmptyState.tsx`** — complete redesign (now "use client"). Fetches `firstName` from `supabase.auth.getUser().user_metadata.full_name` on mount. Renders: branded icon (psychology in primary circle), warm headline (`Welcome back, {firstName}.` or fallback), one-line subtitle, and 4 tappable suggestion chips in a `flex-wrap` row. All chips call `onSuggestion(text)` → auto-prefills input and sends.
+- **`web/components/chat/RecentMemories.tsx`** (new) — self-contained component fetching `getMemories()` on mount. Shows `skeleton-pulse` placeholders (3 cards) while loading. Renders top 5 memories as clickable cards in a responsive CSS grid (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`). Each card shows content (line-clamp-2) + relative date (`Just now` / `5m ago` / `2h ago` / `3d ago`). Click prefills input with `What do I know about: <content>?`. Empty state shows friendly "Nothing saved yet — tell me something to remember."
+- **`web/app/globals.css`** — added `.elevation-1`, `.elevation-2`, `.elevation-3` box-shadow utilities. Applied `elevation-1` to recent-memory cards and the welcome icon container.
+- **`web/components/ui/TopBar.tsx`** — added a small `auto_awesome` icon (tertiary color) next to the "Memex" wordmark for a subtle brand accent.
+- **`web/app/chat/page.tsx`** — added `handleSuggestion` callback (sets input, defers `handleSend()` via setTimeout to flush DOM). Passed to `<EmptyState onSuggestion={handleSuggestion} />`.
+- Build passes, lint clean. Phase 17 code complete.
 
 ### 2026-06-03 — Phase 16 implemented
 - **`recall/models.py`** — `Intent` extended to `Literal["store", "query", "general", "forget"]`.

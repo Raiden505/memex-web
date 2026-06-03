@@ -33,14 +33,38 @@ async function fetchApi<T>(
 }
 
 export async function getMemories(): Promise<Message[]> {
-  const data: { id: string; content: string; created_at: string }[] =
+  const data: { id: string; content: string; created_at: string; metadata?: { pinned?: boolean } | null }[] =
     await fetchApi("/memories");
   return data.map((m) => ({
     id: m.id,
     role: "user" as const,
     content: m.content,
     date: new Date(m.created_at),
+    metadata: m.metadata,
   }));
+}
+
+export async function getMemoryCount(): Promise<number> {
+  const data: { total: number } = await fetchApi("/memories/count");
+  return data.total;
+}
+
+export async function updateMemory(id: string, content: string): Promise<{ id: string; updated: boolean }> {
+  return fetchApi(`/memories/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export async function deleteMemory(id: string): Promise<{ deleted: boolean }> {
+  return fetchApi(`/memories/${id}`, { method: "DELETE" });
+}
+
+export async function setPinned(id: string, pinned: boolean): Promise<{ id: string; pinned: boolean }> {
+  return fetchApi(`/memories/${id}/pin`, {
+    method: "POST",
+    body: JSON.stringify({ pinned }),
+  });
 }
 
 export async function postChat(

@@ -47,7 +47,7 @@ export default function MessageBubble({ role, content, isError, pending }: Messa
         </div>
         <span className="font-metadata text-metadata text-on-surface-variant">Memex AI</span>
       </div>
-      <div className="ai-glow bg-white border border-outline-variant/50 p-4 rounded-2xl rounded-tl-none">
+      <div className="ai-glow bg-surface-container-lowest border border-outline-variant/50 p-4 rounded-2xl rounded-tl-none">
         {showPending ? (
           <PendingIndicator />
         ) : (

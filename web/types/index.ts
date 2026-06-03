@@ -14,4 +14,12 @@ export interface Message {
   isError?: boolean;
   pending?: boolean;
   forgetCandidates?: ForgetCandidate[];
+  metadata?: { pinned?: boolean } | null;
+}
+
+export interface Memory {
+  id: string;
+  content: string;
+  created_at: string;
+  metadata?: { pinned?: boolean } | null;
 }

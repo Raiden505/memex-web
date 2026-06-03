@@ -26,8 +26,8 @@ export default function ChatPage() {
   const inputRef = useRef<ChatInputHandle>(null);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setBooting(false), 600);
-    return () => clearTimeout(timeout);
+    const t = setTimeout(() => setBooting(false), 600);
+    return () => clearTimeout(t);
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -38,9 +38,20 @@ export default function ChatPage() {
     setLoading(true);
     setPendingForget(null);
 
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text, date: new Date() };
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      date: new Date(),
+    };
     const loadingId = crypto.randomUUID();
-    const loadingMsg: Message = { id: loadingId, role: "assistant", content: "", date: new Date(), pending: true };
+    const loadingMsg: Message = {
+      id: loadingId,
+      role: "assistant",
+      content: "",
+      date: new Date(),
+      pending: true,
+    };
 
     setMessages((prev) => [...prev, userMsg, loadingMsg]);
 
@@ -51,10 +62,10 @@ export default function ChatPage() {
     };
 
     try {
-      let capturedCandidates: ForgetCandidate[] | null = null;
+      let captured: ForgetCandidate[] | null = null;
 
       const stream = postChatStream(text, 1, (candidates) => {
-        capturedCandidates = candidates;
+        captured = candidates;
       });
       let first = true;
 
@@ -71,11 +82,11 @@ export default function ChatPage() {
         }
       }
 
-      if (capturedCandidates && (capturedCandidates as ForgetCandidate[]).length > 0) {
-        setPendingForget({ loadingId, candidates: capturedCandidates, originalMsg: text });
+      if (captured && (captured as ForgetCandidate[]).length > 0) {
+        setPendingForget({ loadingId, candidates: captured, originalMsg: text });
       }
-    } catch (streamErr) {
-      console.error("[stream] fell back to non-streaming:", streamErr);
+    } catch (err) {
+      console.error("[stream] fallback:", err);
       try {
         const res = await postChat(text);
         replaceLoading(res.reply);
@@ -93,28 +104,44 @@ export default function ChatPage() {
     }
   }, [input, loading]);
 
-  const handleForgetConfirm = useCallback(async (ids: string[]) => {
-    if (!pendingForget) return;
-    const { loadingId, originalMsg } = pendingForget;
-    setPendingForget(null);
-    setLoading(true);
+  const handleSuggestion = useCallback(
+    (text: string) => {
+      setInput(text);
+      setTimeout(() => {
+        inputRef.current?.focus();
+        handleSend();
+      }, 0);
+    },
+    [handleSend]
+  );
 
-    try {
-      const res = await postChat(originalMsg, { confirmForget: ids });
-      setMessages((prev) =>
-        prev.map((m) => (m.id === loadingId ? { ...m, content: res.reply, pending: false } : m))
-      );
-    } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingId ? { ...m, content: "Couldn't complete the deletion — try again.", isError: true, pending: false } : m
-        )
-      );
-    } finally {
-      setLoading(false);
-      if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
-    }
-  }, [pendingForget]);
+  const handleForgetConfirm = useCallback(
+    async (ids: string[]) => {
+      if (!pendingForget) return;
+      const { loadingId, originalMsg } = pendingForget;
+      setPendingForget(null);
+      setLoading(true);
+
+      try {
+        const res = await postChat(originalMsg, { confirmForget: ids });
+        setMessages((prev) =>
+          prev.map((m) => (m.id === loadingId ? { ...m, content: res.reply, pending: false } : m))
+        );
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === loadingId
+              ? { ...m, content: "Couldn't complete the deletion — try again.", isError: true, pending: false }
+              : m
+          )
+        );
+      } finally {
+        setLoading(false);
+        if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
+      }
+    },
+    [pendingForget]
+  );
 
   const handleForgetCancel = useCallback(() => {
     if (!pendingForget) return;
@@ -131,7 +158,7 @@ export default function ChatPage() {
       {booting ? (
         <SplashTransition />
       ) : messages.length === 0 ? (
-        <EmptyState />
+        <EmptyState onSuggestion={handleSuggestion} />
       ) : (
         <MessageList messages={messages} />
       )}

@@ -28,16 +28,20 @@ create or replace function match_memories(
   match_user_id   uuid,
   match_count     int
 )
-returns table (id uuid, content text, created_at timestamptz, similarity float)
+returns table (id uuid, content text, created_at timestamptz, similarity float, metadata jsonb)
 language sql stable
 as $$
   select m.id, m.content, m.created_at,
-         1 - (m.embedding <=> query_embedding) as similarity
+         1 - (m.embedding <=> query_embedding) as similarity,
+         m.metadata
   from memories m
   where m.user_id = match_user_id
   order by m.embedding <=> query_embedding
   limit match_count;
 $$;
+
+-- 4b. Optional GIN index for metadata queries (phases 19–22)
+create index if not exists memories_metadata_idx on memories using gin (metadata);
 
 -- 5. RLS — Phase 5+ enables row-level security with an owner policy.
 --    Supabase enables RLS by default on new tables, so we enable it explicitly.

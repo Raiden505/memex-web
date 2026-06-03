@@ -21,7 +21,7 @@ def add_memory(client: Client, content: str, embedding: list[float] | None, user
 def list_memories(client: Client, user_id: str) -> list[Memory]:
     result = (
         client.table("memories")
-        .select("id, content, created_at, user_id")
+        .select("id, content, created_at, user_id, metadata")
         .eq("user_id", user_id)
         .order("created_at", desc=True)
         .execute()
@@ -63,6 +63,7 @@ def search_memories(
             content=row["content"],
             created_at=row["created_at"],
             similarity=row["similarity"],
+            metadata=row.get("metadata"),
         )
         for row in result.data
     ]
@@ -79,6 +80,46 @@ def delete_memories(client: Client, ids: list[str], user_id: str) -> int:
         .execute()
     )
     return len(result.data)
+
+
+def update_memory(
+    client: Client, mem_id: str, user_id: str, content: str, embedding: list[float]
+) -> dict:
+    result = (
+        client.table("memories")
+        .update({"content": content, "embedding": embedding})
+        .eq("id", mem_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else {}
+
+
+def set_pinned(
+    client: Client, mem_id: str, user_id: str, pinned: bool
+) -> dict:
+    result = (
+        client.table("memories")
+        .update({"metadata": {"pinned": pinned}})
+        .eq("id", mem_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else {}
+
+
+def search_memories_text(
+    client: Client, user_id: str, query: str
+) -> list[Memory]:
+    result = (
+        client.table("memories")
+        .select("id, content, created_at, user_id, metadata")
+        .eq("user_id", user_id)
+        .ilike("content", f"%{query}%")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return [Memory(**row) for row in result.data]
 
 
 def list_memories_in_range(

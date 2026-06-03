@@ -17,20 +17,6 @@ function formatDate(date: Date): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-function groupByDate(messages: Message[]) {
-  const groups: { label: string; messages: Message[] }[] = [];
-  let currentLabel = "";
-  for (const msg of messages) {
-    const label = formatDate(msg.date);
-    if (label !== currentLabel) {
-      currentLabel = label;
-      groups.push({ label, messages: [] });
-    }
-    groups[groups.length - 1].messages.push(msg);
-  }
-  return groups;
-}
-
 export default function MessageList({ messages }: { messages: Message[] }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -38,28 +24,28 @@ export default function MessageList({ messages }: { messages: Message[] }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const groups = groupByDate(messages);
-
   return (
     <div className="flex-1 overflow-y-auto pb-28">
       <div
         className="px-6 flex flex-col mx-auto"
         style={{ maxWidth: "800px", gap: "12px", paddingTop: "96px" }}
       >
-        {groups.map((group, gi) => (
-          <div key={gi} className="flex flex-col gap-3">
-            <DateDivider label={group.label} />
-            {group.messages.map((msg) => (
+        {messages.map((msg, i) => {
+          const currLabel = formatDate(msg.date);
+          const prevLabel = i > 0 ? formatDate(messages[i - 1].date) : null;
+          const showDivider = prevLabel !== null && currLabel !== prevLabel;
+          return (
+            <div key={msg.id} className="flex flex-col gap-3">
+              {showDivider && <DateDivider label={currLabel} />}
               <MessageBubble
-                key={msg.id}
                 role={msg.role}
                 content={msg.content}
                 isError={msg.isError}
                 pending={msg.pending}
               />
-            ))}
-          </div>
-        ))}
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
     </div>

@@ -28,7 +28,7 @@ export default async function proxy(request: NextRequest) {
 
   const { data } = await supabase.auth.getUser();
 
-  if (!data.user && request.nextUrl.pathname.startsWith("/chat")) {
+  if (!data.user && (request.nextUrl.pathname.startsWith("/chat") || request.nextUrl.pathname.startsWith("/library"))) {
     return NextResponse.redirect(new URL("/auth", request.url));
   }
 
@@ -40,5 +40,5 @@ export default async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/chat/:path*", "/auth"],
+  matcher: ["/chat/:path*", "/library/:path*", "/auth"],
 };

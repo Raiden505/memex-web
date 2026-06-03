@@ -125,7 +125,7 @@ Terminal       → direct module calls →  Supabase + Gemini
 >
 > `AGENTS.md` only snapshots architecture and conventions; phase completion, next-up work, and session notes live in `MEMORY.md`.
 
-**Phase 16** — complete. Next: **Phase 17 — Richer chat UI & theme depth**.
+**Phase 18** — complete. Next: **Phase 19 — Memory Library**.
 
 ## CLI output
 

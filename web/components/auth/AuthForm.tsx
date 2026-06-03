@@ -90,7 +90,7 @@ export default function AuthForm() {
   return (
     <main className="w-full max-w-[440px] z-10">
       <header className="text-center mb-10">
-        <h1 className="tracking-tight mb-2" style={{ fontFamily: "var(--font-manrope)", fontSize: "40px", lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: 700, color: "#00236f" }}>Memex</h1>
+        <h1 className="tracking-tight mb-2 text-primary" style={{ fontFamily: "var(--font-manrope)", fontSize: "40px", lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: 700 }}>Memex</h1>
         <p className="font-body-md text-body-md text-on-surface-variant">Cognitive clarity for your second brain.</p>
       </header>
 
@@ -107,16 +107,14 @@ export default function AuthForm() {
           <button
             type="button"
             onClick={() => { setMode("login"); clearErrors(); }}
-            className="flex-1 py-2 font-label-md text-label-md relative z-10 transition-colors cursor-pointer"
-            style={{ color: isLogin ? "#00236f" : "#444651" }}
+            className={`flex-1 py-2 font-label-md text-label-md relative z-10 transition-colors cursor-pointer ${isLogin ? "text-primary" : "text-on-surface-variant"}`}
           >
             Login
           </button>
           <button
             type="button"
             onClick={() => { setMode("signup"); clearErrors(); }}
-            className="flex-1 py-2 font-label-md text-label-md relative z-10 transition-colors cursor-pointer"
-            style={{ color: !isLogin ? "#00236f" : "#444651" }}
+            className={`flex-1 py-2 font-label-md text-label-md relative z-10 transition-colors cursor-pointer ${!isLogin ? "text-primary" : "text-on-surface-variant"}`}
           >
             Signup
           </button>

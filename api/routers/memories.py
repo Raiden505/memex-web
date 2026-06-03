@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from supabase import Client
 
 from api.dependencies import get_current_user, get_db
-from recall import store
+from recall import embeddings, store
 from recall.config import load_config
 
 router = APIRouter()
@@ -18,6 +18,15 @@ class MemoryOut(BaseModel):
     id: str
     content: str
     created_at: str
+    metadata: dict | None = None
+
+
+class UpdateRequest(BaseModel):
+    content: str
+
+
+class PinRequest(BaseModel):
+    pinned: bool
 
 
 @router.post("", status_code=201)
@@ -42,7 +51,52 @@ async def list_memories(
         memories = store.list_memories(db, user_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to list memories: {exc}")
-    return [MemoryOut(id=m.id, content=m.content, created_at=m.created_at) for m in memories]
+    return [MemoryOut(id=m.id, content=m.content, created_at=m.created_at, metadata=m.metadata) for m in memories]
+
+
+@router.patch("/{mem_id}")
+async def update_memory(
+    mem_id: str,
+    body: UpdateRequest,
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> dict:
+    try:
+        embedding = embeddings.embed(body.content, _cfg, task_type="RETRIEVAL_DOCUMENT")
+        row = store.update_memory(db, mem_id, user_id, body.content, embedding)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update memory: {exc}")
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"id": row["id"], "updated": True}
+
+
+@router.post("/{mem_id}/pin")
+async def pin_memory(
+    mem_id: str,
+    body: PinRequest,
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> dict:
+    try:
+        row = store.set_pinned(db, mem_id, user_id, body.pinned)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to pin memory: {exc}")
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"id": row["id"], "pinned": body.pinned}
+
+
+@router.get("/count")
+async def memory_count(
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> dict:
+    try:
+        total = store.count_memories(db, user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to count memories: {exc}")
+    return {"total": total}
 
 
 @router.delete("/{mem_id}")

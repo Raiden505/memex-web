@@ -2,7 +2,7 @@
 
 /* ─── Stitch Design — exact color palette & utilities ──────────────────── */
 
-@theme inline {
+@theme {
   --color-surface:                    #f8f9fa;
   --color-surface-dim:                #d9dadb;
   --color-surface-variant:            #e1e3e4;
@@ -61,21 +61,77 @@
   --spacing-sidebar-width: 280px;
 }
 
+/* ─── Dark mode overrides ─────────────────────────────────────────────── */
+
+[data-theme="dark"] {
+  --color-surface:                    #14161a;
+  --color-surface-dim:                #3a3d45;
+  --color-surface-variant:            #2a2d35;
+  --color-surface-container:          #1f2229;
+  --color-surface-container-low:      #25282f;
+  --color-surface-container-lowest:   #1b1e24;
+  --color-surface-container-high:     #2a2d35;
+  --color-surface-container-highest:  #33363f;
+  --color-background:                   #14161a;
+
+  --color-primary:                    #b6c4ff;
+  --color-on-primary:                 #00236f;
+  --color-primary-container:          #3a4d8a;
+  --color-primary-fixed:              #3a4d8a;
+  --color-primary-fixed-dim:          #b6c4ff;
+  --color-on-primary-container:       #dce1ff;
+
+  --color-secondary:                  #8abfa8;
+  --color-on-secondary:               #002211;
+  --color-secondary-container:        #2a4d3b;
+  --color-secondary-fixed:            #2a4d3b;
+  --color-secondary-fixed-dim:        #a8cfbc;
+  --color-on-secondary-container:     #c3ecd7;
+
+  --color-tertiary:                   #c0c1ff;
+  --color-on-tertiary:                #0d0097;
+  --color-tertiary-container:         #3a3d8a;
+  --color-on-tertiary-container:      #e1e0ff;
+  --color-tertiary-fixed:             #3a3d8a;
+  --color-tertiary-fixed-dim:         #c0c1ff;
+
+  --color-error:                      #ffb4ab;
+  --color-on-error:                   #690005;
+
+  --color-on-surface:                 #e3e3e6;
+  --color-on-surface-variant:         #c2c4cc;
+
+  --color-outline:                    #8c8f99;
+  --color-outline-variant:            #3a3d45;
+
+  --color-inverse-primary:            #00236f;
+}
+
 /* ─── Stitch custom CSS ─────────────────────────────────────────────────── */
 
 body {
-  background-color: #f8f9fa;
+  background-color: var(--color-background);
   background-image:
     radial-gradient(at 0% 0%, rgba(220, 225, 255, 0.3) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(195, 236, 215, 0.2) 0px, transparent 50%);
   min-height: 100vh;
 }
 
+[data-theme="dark"] body {
+  background-image:
+    radial-gradient(at 0% 0%, rgba(54, 68, 138, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(42, 77, 59, 0.12) 0px, transparent 50%);
+}
+
 .glass-panel {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 0.5px solid #E5E7EB;
+  border: 0.5px solid var(--color-outline-variant);
+}
+
+[data-theme="dark"] .glass-panel {
+  background: rgba(27, 30, 36, 0.7);
 }
 
 .mode-toggle-transition {
@@ -99,10 +155,35 @@ body {
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #e1e3e4; border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-surface-variant); border-radius: 10px; }
 
 .input-pill {
   box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] .input-pill {
+  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* Elevation tokens */
+.elevation-1 {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.elevation-2 {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+}
+.elevation-3 {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .elevation-1 {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .elevation-2 {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .elevation-3 {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
 }
 
 @keyframes message-in {

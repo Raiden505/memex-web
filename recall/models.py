@@ -8,6 +8,7 @@ class Memory:
     content: str
     created_at: str
     user_id: str
+    metadata: dict | None = None
 
 
 @dataclass
@@ -16,6 +17,7 @@ class SearchResult:
     content: str
     created_at: str
     similarity: float  # 0..1, higher = more similar
+    metadata: dict | None = None
 
 
 Intent = Literal["store", "query", "general", "forget"]
