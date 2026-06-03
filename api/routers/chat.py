@@ -1,7 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from supabase import Client
+import json
 
 from api.dependencies import get_current_user, get_db
 from recall import embeddings, llm, router, store, temporal
@@ -9,6 +12,10 @@ from recall.config import load_config
 
 chat_router = APIRouter()
 _cfg = load_config()
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 class ChatRequest(BaseModel):
@@ -52,14 +59,18 @@ async def chat(
         return StreamingResponse(
             _stream_chat(body.message, intent, user_id, db, body.tz),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     try:
         if intent == "store":
             embedding = embeddings.embed(body.message, _cfg, task_type="RETRIEVAL_DOCUMENT")
             row = store.add_memory(db, body.message, embedding, user_id)
-            return ChatResponse(intent="store", reply="Saved.", id=row["id"], source="memory")
+            return ChatResponse(intent="store", reply=llm.save_ack(), id=row["id"], source="memory")
         elif intent == "general":
             reply = llm.chat_general(body.message, _cfg)
             return ChatResponse(intent="general", reply=reply, id=None, source="general")
@@ -76,26 +87,29 @@ async def _stream_chat(message: str, intent: str, user_id: str, db: Client, tz: 
         if intent == "store":
             embedding = embeddings.embed(message, _cfg, task_type="RETRIEVAL_DOCUMENT")
             row = store.add_memory(db, message, embedding, user_id)
-            yield f"data: Saved.\n\n"
-            yield f"data: [DONE]\n\n"
+            yield _sse({"t": llm.save_ack()})
+            yield _sse({"done": True})
         elif intent == "general":
-            for token in llm.chat_general_stream(message, _cfg):
-                yield f"data: {token}\n\n"
-            yield f"data: [DONE]\n\n"
+            async for token in llm.chat_general_stream_async(message, _cfg):
+                yield _sse({"t": token})
+                await asyncio.sleep(0)
+            yield _sse({"done": True})
         else:
             tz_str = tz or "UTC"
             rng = temporal.extract_range(message, tz=tz_str)
             if rng:
                 start, end, label = rng
                 mems = store.list_memories_in_range(db, user_id, start, end)
-                for token in llm.summarize_window_stream(mems, label, _cfg):
-                    yield f"data: {token}\n\n"
+                async for token in llm.summarize_window_stream_async(mems, label, _cfg):
+                    yield _sse({"t": token})
+                    await asyncio.sleep(0)
             else:
                 query_embedding = embeddings.embed(message, _cfg, task_type="RETRIEVAL_QUERY")
                 results = store.search_memories(db, query_embedding, user_id, _cfg.top_k)
-                for token in llm.synthesize_answer_stream(message, results, _cfg):
-                    yield f"data: {token}\n\n"
-            yield f"data: [DONE]\n\n"
+                async for token in llm.synthesize_answer_stream_async(message, results, _cfg):
+                    yield _sse({"t": token})
+                    await asyncio.sleep(0)
+            yield _sse({"done": True})
     except Exception as exc:
-        yield f"data: Error: {exc}\n\n"
-        yield f"data: [DONE]\n\n"
+        yield _sse({"error": str(exc)})
+        yield _sse({"done": True})

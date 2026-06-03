@@ -7,10 +7,10 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 11 code complete. All phases 0–11 implemented.
-- **Last worked on:** 2026-06-02
-- **Last agent action:** Phase 11 implemented — Web UX refinements. ChatInput now uses `forwardRef` + `useImperativeHandle`, textarea never disabled (typing always works), send gated via `loading` check in Enter handler + `disabled={!hasText || loading}` on button. Chat page refocuses input after reply (guarded by `matchMedia('(pointer: fine)')`). Auth page fires fire-and-forget `GET /health` on mount to warm backend.
-- **Prior agent action:** Phase 10 implemented — Temporal recall.
+- **Phase:** 15 complete (personality & prompt system). **Next: Phase 16 — Natural-language forget.**
+- **Last worked on:** 2026-06-03
+- **Last agent action:** Phase 15 — created `recall/prompts.py` (all prompts + `MEMEX_VOICE` + `SAVE_ACKS`); `llm.py` imports from it and adds `save_ack()`; `chat.py` and `cli.py` use `save_ack()` instead of fixed `"Saved."`.
+- **Prior agent action:** Phase 14 implemented — Reliable streaming (SSE framing fix).
 
 ---
 
@@ -30,6 +30,17 @@ Read this before touching any code. Write to it after every change.
 | 9     | Conversational range (GENERAL) | code complete | `Intent` += "general"; router greeting/meta fast-path + 3-way classifier; `llm.chat_general(_stream)`; CLI + FastAPI general branch; optional `source` field. Personal-recall miss stays strict. |
 | 10    | Temporal recall             | code complete | `temporal.extract_range`, `store.list_memories_in_range`, `llm.summarize_window(_stream)`, optional `tz` on `/chat`, `memories_user_created_idx` index. |
 | 11    | Web UX refinements          | code complete | refocus input after reply (desktop only); type-while-loading (send gated); optimistic chat shell + `/health` warm-up from auth page. |
+| 12    | Auth & onboarding hardening | code complete | password-eye works; duplicate-signup handled; name→`user_metadata`; humane errors; resend confirmation. `web/components/auth/AuthForm.tsx`, new `web/lib/auth-helpers.ts`, `Icon.tsx` (+`visibility_off`). |
+| 13    | Transitions & status states | code complete | branded splash hand-off (SplashTransition); neutral 3-dot indicator replaces "Retrieving memories…" via `pending` flag; first-token swap. `web/app/chat/page.tsx`, `MessageBubble.tsx` (+`PendingIndicator`), `MessageList.tsx` (pass `pending`), `SplashTransition.tsx` (new), `LoadingSkeleton.tsx` (new), `globals.css` (+dot-pulse/skeleton-shimmer). |
+| 14    | Reliable streaming          | code complete | **root cause fixed:** `api/routers/chat.py` now JSON-encodes SSE frames via `_sse({"t"|"done"|"error"})`; `web/lib/api.ts` splits on `\n\n` event boundaries and `JSON.parse`s each frame. Tokens with newlines survive transport losslessly. |
+| 15    | Personality & prompt system | code complete | `recall/prompts.py` (all prompts + `MEMEX_VOICE` + `SAVE_ACKS`); `llm.save_ack()` replaces fixed "Saved." in CLI + API. No-hallucination short-circuits unchanged. |
+| 16    | Natural-language forget     | planned (docs) | 4th intent `forget`; resolve by time (temporal) or detail (semantic ≥0.6); **two-step confirm via `confirm_forget`/`forget_candidates`**; `store.delete_memories`. Never delete on first turn. |
+| 17    | Richer chat UI & theme depth | planned (docs) | remove standing "TODAY" divider (only between differing dates); welcoming empty state + suggestion chips; `RecentMemories` cards from `getMemories`; elevation/depth tokens. |
+| 18    | Settings menu & dark mode   | planned (docs) | `SettingsMenu` dropdown by logout; **real dark mode = tokenise hardcoded hex** (`AuthForm` `#00236f`, `MessageBubble` `bg-white`); `data-theme` + no-flash script; `web/lib/theme.ts`. |
+| 19    | Memory Library              | planned (docs) | `/library` route; `PATCH /memories/{id}` (re-embed), pin via `metadata.pinned`; browse/search/edit/delete/pin. |
+| 20    | Organisation & reminders    | planned (docs) | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
+| 21    | Data ownership & insights   | planned (docs) | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
+| 22    | Capture & reach             | planned (docs) | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
 
 ---
 
@@ -49,6 +60,10 @@ Fill these in once confirmed against official docs before writing integration co
 
 | Date       | Decision | Reason |
 |------------|----------|--------|
+| 2026-06-02 | Wave 2 (phases 12–22) planned into `PRD-v3.md`/`TDD-v3.md` Part II rather than new files | User asked to "add to" the existing v3 docs; phase numbers continue 12+; the requested fixes (12–18) ship before the new product surface (19–22) |
+| 2026-06-02 | Streaming bug diagnosed: tokens with `\n` break `data: {token}\n\n` SSE framing; `api.ts` drops any line not starting with `data: `. Fix = JSON-encode each frame (`{t|done|error}`) and split client buffer on `\n\n` | Pinpointed from reading `chat.py` `_stream_chat` + `api.ts` `postChatStream`; JSON-encoding is the simplest lossless transport and avoids fiddly multi-`data:` rejoining |
+| 2026-06-02 | New state (pin/tags/due/shared) rides existing `metadata jsonb`; name rides `user_metadata`; only optional GIN index + optional shared-RLS policy are schema changes | Keeps Wave 2 migration-light; `vector(768)`/HNSW/`match_memories` untouched |
+| 2026-06-02 | Natural-language forget uses a stateless two-step confirm (`confirm_forget` ids in the request), never deletes on the first turn | Destructive + irreversible; carrying the confirm token in the request avoids server session state while guaranteeing an explicit confirm |
 | 2026-06-02 | v3 fallback rule: add a 3rd `GENERAL` intent for greetings/general-knowledge (always answered by Gemini); personal-recall (`query`) misses still return the fixed "nothing saved" — Gemini never invents personal facts | User choice. Greetings/general are classified up front and never hit the DB, which keeps the no-hallucination guarantee intact for personal facts while still handling non-memory input gracefully |
 | 2026-06-02 | Consolidated all spec into `PRD.md` / `TDD.md` (v1+v2+v3, phases 0–11); kept `PRD-v2/TDD-v2` + new `PRD-v3/TDD-v3` as detailed references | User asked to amend v2 + new v3 into the original docs; originals are now the single current source, version docs hold per-phase detail |
 | 2026-06-02 | Temporal recall via `created_at` btree index + `list_memories_in_range`, not a new RPC/schema column; tz passed from the web client (`Intl…timeZone`) | "today" must mean the user's local day; a filtered select on an indexed column is enough, no vector change needed |
@@ -79,6 +94,48 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-03 — Phase 15 implemented
+- **`recall/prompts.py`** (new) — single source of truth for all LLM prompts. Contains `MEMEX_VOICE` preamble (warm, concise, quietly clever), `_NO_MEMORIES`, `_SYSTEM_PROMPT` (synthesis + voice appended), `_INTENT_SYSTEM` (classifier — voice deliberately excluded, must stay deterministic), `_PERSONA_PROMPT` (general handler + voice appended), `_SUMMARY_SYSTEM` (temporal window + voice appended), and `SAVE_ACKS` (10-item rotation list).
+- **`recall/llm.py`** — removed all inline prompt constants; imports them from `recall.prompts`. Added `save_ack(content=None, rng=None) -> str` returning a random member of `SAVE_ACKS` (injectable rng for deterministic tests).
+- **`api/routers/chat.py`** — store branches (streaming + non-streaming) now call `llm.save_ack()` instead of returning a fixed `"Saved."` string.
+- **`recall/cli.py`** — `_do_store` now prints `llm.save_ack()` instead of `"Saved."`.
+- All no-hallucination short-circuits (`_NO_MEMORIES`, `"Nothing saved {label}."`) are unchanged — persona text only appears on the grounded/general prompts.
+
+### 2026-06-03 — Streaming async fix (post-phase-14)
+- **Root cause identified:** `_stream_chat` in `chat.py` used synchronous `for token in llm.chat_general_stream(...)` etc. These sync generators call `client.models.generate_content_stream` (blocking I/O), which freezes the asyncio event loop. Uvicorn queues the write after each `yield` but the event loop can't flush until the sync generator exhausts — so all tokens arrive at once.
+- **`recall/llm.py`** — Added three async generator functions using `client.aio.models.generate_content_stream` (non-blocking): `synthesize_answer_stream_async`, `chat_general_stream_async`, `summarize_window_stream_async`. Sync variants kept for CLI use.
+- **`api/routers/chat.py`** — `_stream_chat` updated to use `async for` with the three new async generators. Added `X-Accel-Buffering: no` to `StreamingResponse` headers to prevent nginx proxy buffering on Railway.
+
+### 2026-06-03 — Phase 14 implemented
+- **Root cause fixed:** tokens containing `\n` were breaking raw `data: {token}\n\n` SSE framing — the frontend splits on `\n` and discarded lines not starting with `data: `, silently dropping multi-line content.
+- **`api/routers/chat.py`** — added `_sse(payload: dict) -> str` helper that JSON-encodes each frame: `f"data: {json.dumps(payload)}\n\n"`. All `yield f"data: {token}\n\n"` → `yield _sse({"t": token})`. `[DONE]` → `_sse({"done": True})`. Error → `_sse({"error": str(exc)})`. `json.dumps` escapes newlines as `\n`, so every event is exactly one line.
+- **`web/lib/api.ts`** — `postChatStream` buffer now splits on `"\n\n"` (SSE event boundaries) instead of `"\n"`. Each event is `JSON.parse`d: `obj.done` → return, `obj.error` → throw, `obj.t` → yield. JSON parse errors (partial buffers) are skipped. Trailing partial buffer handling preserved. One-retry + non-streaming fallback unchanged.
+- Manual verification: save 3 items, ask "what did I tell you today?" — all lines render and text visibly grows token-by-token.
+- Build + lint clean. Phase 14 code complete.
+
+### 2026-06-03 — Phase 13 implemented
+- **`web/types/index.ts`** — added `pending?: boolean` to `Message` interface.
+- **`web/app/globals.css`** — added `dot-pulse` keyframe animation (3 staggered spans, 1.2s cycle) for the neutral working indicator. Added `skeleton-shimmer` keyframe for hydration skeleton placeholders.
+- **`web/components/chat/MessageBubble.tsx`** — added `pending` prop. When `pending && !content`, renders a `<PendingIndicator/>` (three pulsing dots) instead of text content. On first token arrival, `pending: false` is set and the content renders in place — smooth swap with no flicker.
+- **`web/components/chat/MessageList.tsx`** — passes `pending={msg.pending}` through to `MessageBubble`.
+- **`web/components/ui/SplashTransition.tsx`** (new) — branded hand-off between auth and chat: centered "Memex" wordmark + `psychology` icon + a slim indeterminate progress bar. Renders on the same surface background, resolved within ~600ms max.
+- **`web/components/ui/LoadingSkeleton.tsx`** (new) — reusable skeleton card placeholders (`skeleton-pulse` shimmer) for hydration while data loads.
+- **`web/app/chat/page.tsx`** — replaced the hardcoded `"Retrieving memories..."` loading message with `content: ""`, `pending: true`. On first streamed token, `replaceLoading` now clears `pending: false` alongside setting content, so the working indicator swaps to real text in the same bubble. Added `booting` state with a 600ms max timeout; while booting, `<SplashTransition/>` renders in the message area (top bar + input shell mount instantly — fast first paint).
+- Build + lint clean. Phase 13 code complete.
+
+### 2026-06-03 — Phase 12 implemented
+- **`web/components/ui/Icon.tsx`** — added `visibility_off` case (Feather eye-off path: eye with slash icon).
+- **`web/lib/auth-helpers.ts`** (new) — `isDuplicateSignup(error, data)`: checks `AuthApiError` message for "already registered/exists/been registered" OR `data.user.identities` length of 0 (email-confirmation-on case). `mapAuthError(message)`: maps common auth failures (invalid credentials, email not confirmed, rate limit, network errors, weak password) to short, friendly copy. Both are pure functions importable without React.
+- **`web/components/auth/AuthForm.tsx`** — R12.1: `showPassword` state toggles input type + eye icon (`visibility`↔`visibility_off`). R12.2: duplicate-signup detection calls `isDuplicateSignup`; on match → switches to login mode, keeps email, shows friendly notice, auto-focuses password field. R12.3: name passed via `options: { data: { full_name: name } }` on signup. R12.4: all errors routed through `mapAuthError`; login errors use original message for field routing (email vs password). R12.5: confirmation notice styled with `text-secondary` (success state); "Resend confirmation email" text button calls `supabase.auth.resend({ type: "signup", email })` with disable-once-sent UX.
+- Build + lint clean. Phase 12 code complete.
+
+### 2026-06-02 — Wave 2 (v3.1) planning (docs only, no code)
+- Re-read `PRD.md`/`TDD.md`/`PRD-v3.md`/`TDD-v3.md` and the live code (`AuthForm.tsx`, `chat/page.tsx`, `lib/api.ts`, `ChatInput.tsx`, `TopBar.tsx`, `MessageBubble.tsx`, `DateDivider.tsx`, `EmptyState.tsx`, `Icon.tsx`, `globals.css`, `api/routers/chat.py`, `recall/llm.py`, `recall/router.py`, `recall/store.py`, `recall/models.py`) to ground the plan.
+- **Appended Part II to `PRD-v3.md`** — Wave 2 product spec, phases 12–22, each with requirements + Definition of Done: (12) auth/onboarding hardening, (13) transitions/status, (14) reliable streaming, (15) personality/prompt system, (16) natural-language forget, (17) richer UI/theme depth, (18) settings menu + dark mode, (19) Memory Library, (20) organisation/reminders, (21) data ownership/insights, (22) capture/reach. Plus cross-cutting principles + audience notes.
+- **Appended Part II to `TDD-v3.md`** — file-level how for each phase: exact files/signatures/edits, the streaming root-cause + JSON-SSE fix, prompt-module refactor, 4th `forget` intent + two-step confirm protocol, dark-mode tokenisation audit, `metadata`-jsonb-only schema strategy, contract/API deltas, schema deltas table, network-free test list, sequencing/risk notes.
+- Diagnosed the streaming bug (see Decisions Log). Identified dark mode as larger than it looks (hardcoded hex in components needs tokenising).
+- No source files changed. Next implementation step: **Phase 12**.
 
 ### 2026-06-02 — Phase 11 implemented
 - **`web/components/chat/ChatInput.tsx`** — converted to `forwardRef` with `useImperativeHandle` exposing `focus()`. Removed `disabled` from the `<input>` element entirely — user can always type. Enter handler gates on `loading`: `if (!loading && value.trim()) onSend()`. Send button uses `disabled={!hasText || loading}`. Changed `disabled` prop to `loading`.

@@ -55,6 +55,7 @@ export default function MessageList({ messages }: { messages: Message[] }) {
                 role={msg.role}
                 content={msg.content}
                 isError={msg.isError}
+                pending={msg.pending}
               />
             ))}
           </div>

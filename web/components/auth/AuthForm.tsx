@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { isDuplicateSignup, mapAuthError } from "@/lib/auth-helpers";
 import Icon from "@/components/ui/Icon";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -10,6 +11,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export default function AuthForm() {
   const router = useRouter();
   const supabase = createClient();
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -19,12 +21,23 @@ export default function AuthForm() {
   const [passwordError, setPasswordError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [noticeSent, setNoticeSent] = useState(false);
 
   useEffect(() => {
     fetch(`${API_URL}/health`, { mode: "no-cors" }).catch(() => {});
   }, []);
 
-  const clearErrors = () => { setEmailError(""); setPasswordError(""); setNotice(""); };
+  const clearErrors = () => { setEmailError(""); setPasswordError(""); setNotice(""); setNoticeSent(false); };
+
+  const handleResendConfirmation = async () => {
+    setNoticeSent(true);
+    const { error } = await supabase.auth.resend({ type: "signup", email });
+    if (error) {
+      setNoticeSent(false);
+      setNotice(mapAuthError(error.message));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,21 +47,40 @@ export default function AuthForm() {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          const msg = error.message;
-          if (msg.toLowerCase().includes("email") || msg.toLowerCase().includes("user")) setEmailError(msg);
-          else setPasswordError(msg);
+          const msg = error.message.toLowerCase();
+          const friendly = mapAuthError(error.message);
+          if (msg.includes("invalid login credentials") || msg.includes("email") || msg.includes("user")) {
+            setEmailError(friendly);
+          } else {
+            setPasswordError(friendly);
+          }
           return;
         }
         router.push("/chat"); router.refresh();
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) {
-          if (error.message.toLowerCase().includes("email")) setEmailError(error.message);
-          else setPasswordError(error.message);
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: name } },
+        });
+
+        if (isDuplicateSignup(error as Parameters<typeof isDuplicateSignup>[0], data as Parameters<typeof isDuplicateSignup>[1])) {
+          setMode("login");
+          setNotice("Looks like you already have an account — log in instead.");
+          setTimeout(() => passwordRef.current?.focus(), 50);
           return;
         }
+
+        if (error) {
+          const msg = error.message.toLowerCase();
+          const friendly = mapAuthError(error.message);
+          if (msg.includes("email")) setEmailError(friendly);
+          else setPasswordError(friendly);
+          return;
+        }
+
         if (data.session) { router.push("/chat"); router.refresh(); }
-        else setNotice("Account created. Check your email to confirm it.");
+        else setNotice("Account created — check your email to confirm it.");
       }
     } finally { setLoading(false); }
   };
@@ -145,7 +177,8 @@ export default function AuthForm() {
               <Icon name="lock" size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
               <input
                 id="password"
-                type="password"
+                type={showPassword ? "text" : "password"}
+                ref={passwordRef}
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setPasswordError(""); }}
                 required
@@ -153,14 +186,32 @@ export default function AuthForm() {
                 placeholder="••••••••"
                 className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-10 pr-12 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
               />
-              <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-primary transition-colors cursor-pointer">
-                <Icon name="visibility" size={20} />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-primary transition-colors cursor-pointer"
+              >
+                <Icon name={showPassword ? "visibility_off" : "visibility"} size={20} />
               </button>
             </div>
             {passwordError && <p className="text-xs text-error">{passwordError}</p>}
           </div>
 
-          {notice && <p className="text-xs text-on-surface-variant font-metadata">{notice}</p>}
+          {notice && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-secondary font-metadata">{notice}</p>
+              {!isLogin && notice.includes("confirm") && (
+                <button
+                  type="button"
+                  onClick={handleResendConfirmation}
+                  disabled={noticeSent}
+                  className="text-xs text-primary hover:underline cursor-pointer text-left disabled:opacity-50"
+                >
+                  {noticeSent ? "Confirmation email resent." : "Resend confirmation email"}
+                </button>
+              )}
+            </div>
+          )}
 
           <button
             type="submit"

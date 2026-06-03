@@ -6,4 +6,5 @@ export interface Message {
   content: string;
   date: Date;
   isError?: boolean;
+  pending?: boolean;
 }

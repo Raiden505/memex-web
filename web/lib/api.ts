@@ -91,20 +91,29 @@ export async function* postChatStream(
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
 
-        for (const line of lines) {
+        for (const event of events) {
+          const line = event.trim();
           if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
+          const raw = line.slice(6);
 
-          if (data === "[DONE]") return;
-
-          if (data.startsWith("Error:")) {
-            throw new Error(data.slice(7));
+          try {
+            const obj = JSON.parse(raw);
+            if (obj.done) return;
+            if (obj.error) {
+              console.error("[stream] server error:", obj.error);
+              throw new Error(obj.error);
+            }
+            if (obj.t !== undefined) {
+              yield obj.t;
+              await new Promise<void>((r) => setTimeout(r, 0));
+            }
+          } catch (err) {
+            if (err instanceof SyntaxError) continue;
+            throw err;
           }
-
-          yield data;
         }
       }
       return;

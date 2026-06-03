@@ -5,13 +5,22 @@ interface MessageBubbleProps {
   role: Role;
   content: string;
   isError?: boolean;
+  pending?: boolean;
 }
 
 function fmt(date: Date) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function MessageBubble({ role, content, isError }: MessageBubbleProps) {
+function PendingIndicator() {
+  return (
+    <div className="dot-pulse">
+      <span /><span /><span />
+    </div>
+  );
+}
+
+export default function MessageBubble({ role, content, isError, pending }: MessageBubbleProps) {
   const now = new Date();
 
   if (role === "user") {
@@ -28,6 +37,8 @@ export default function MessageBubble({ role, content, isError }: MessageBubbleP
     );
   }
 
+  const showPending = pending && !content;
+
   return (
     <div className="flex flex-col gap-2 max-w-[85%] message-enter">
       <div className="flex items-center gap-2 mb-1">
@@ -37,11 +48,15 @@ export default function MessageBubble({ role, content, isError }: MessageBubbleP
         <span className="font-metadata text-metadata text-on-surface-variant">Memex AI</span>
       </div>
       <div className="ai-glow bg-white border border-outline-variant/50 p-4 rounded-2xl rounded-tl-none">
-        <p
-          className={`font-body-md text-body-md leading-relaxed ${isError ? "text-error" : "text-on-surface"}`}
-        >
-          {content}
-        </p>
+        {showPending ? (
+          <PendingIndicator />
+        ) : (
+          <p
+            className={`font-body-md text-body-md leading-relaxed ${isError ? "text-error" : "text-on-surface"}`}
+          >
+            {content}
+          </p>
+        )}
       </div>
       <span className="font-metadata text-metadata text-outline ml-1">{fmt(now)}</span>
     </div>
