@@ -68,6 +68,19 @@ def search_memories(
     ]
 
 
+def delete_memories(client: Client, ids: list[str], user_id: str) -> int:
+    if not ids:
+        return 0
+    result = (
+        client.table("memories")
+        .delete()
+        .in_("id", ids)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return len(result.data)
+
+
 def list_memories_in_range(
     client: Client, user_id: str, start: datetime, end: datetime
 ) -> list[Memory]:

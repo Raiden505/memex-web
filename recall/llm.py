@@ -108,6 +108,8 @@ def classify_intent(text: str, cfg: Config) -> Intent:
             return "query"
         if "GENERAL" in reply:
             return "general"
+        if "FORGET" in reply:
+            return "forget"
         return "store"
     except Exception:
         return "store"  # safer to over-save than lose input on failure

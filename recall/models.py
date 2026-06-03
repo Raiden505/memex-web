@@ -18,4 +18,4 @@ class SearchResult:
     similarity: float  # 0..1, higher = more similar
 
 
-Intent = Literal["store", "query", "general"]
+Intent = Literal["store", "query", "general", "forget"]

@@ -1,7 +1,7 @@
 /* ─── SVG icons replacing Material Symbols font ──────────────────────────── */
 
 interface IconProps {
-  name: "add_circle" | "arrow_forward" | "auto_awesome" | "check_circle" | "lock" | "logout" | "mail" | "person" | "progress_activity" | "psychology" | "send" | "settings" | "visibility" | "visibility_off";
+  name: "add_circle" | "arrow_forward" | "auto_awesome" | "check_circle" | "delete" | "lock" | "logout" | "mail" | "person" | "progress_activity" | "psychology" | "send" | "settings" | "visibility" | "visibility_off";
   size?: number;
   className?: string;
   style?: React.CSSProperties;
@@ -28,6 +28,12 @@ export default function Icon({ name, size = 24, className, style }: IconProps) {
       return (
         <svg className={c} style={s} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+      );
+    case "delete":
+      return (
+        <svg className={c} style={s} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
         </svg>
       );
     case "check_circle":

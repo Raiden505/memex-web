@@ -7,10 +7,10 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 15 complete (personality & prompt system). **Next: Phase 16 — Natural-language forget.**
+- **Phase:** 16 complete (natural-language forget). **Next: Phase 17 — Richer chat UI & theme depth.**
 - **Last worked on:** 2026-06-03
-- **Last agent action:** Phase 15 — created `recall/prompts.py` (all prompts + `MEMEX_VOICE` + `SAVE_ACKS`); `llm.py` imports from it and adds `save_ack()`; `chat.py` and `cli.py` use `save_ack()` instead of fixed `"Saved."`.
-- **Prior agent action:** Phase 14 implemented — Reliable streaming (SSE framing fix).
+- **Last agent action:** Phase 16 — 4th intent `forget`; router heuristic; 4-way classifier; `store.delete_memories`; two-step confirm in API; `fc` SSE frame; `ForgetConfirm.tsx`; full CLI natural-language forget flow.
+- **Prior agent action:** Phase 15 — prompt system centralised in `recall/prompts.py`, `save_ack()` rotation.
 
 ---
 
@@ -34,7 +34,7 @@ Read this before touching any code. Write to it after every change.
 | 13    | Transitions & status states | code complete | branded splash hand-off (SplashTransition); neutral 3-dot indicator replaces "Retrieving memories…" via `pending` flag; first-token swap. `web/app/chat/page.tsx`, `MessageBubble.tsx` (+`PendingIndicator`), `MessageList.tsx` (pass `pending`), `SplashTransition.tsx` (new), `LoadingSkeleton.tsx` (new), `globals.css` (+dot-pulse/skeleton-shimmer). |
 | 14    | Reliable streaming          | code complete | **root cause fixed:** `api/routers/chat.py` now JSON-encodes SSE frames via `_sse({"t"|"done"|"error"})`; `web/lib/api.ts` splits on `\n\n` event boundaries and `JSON.parse`s each frame. Tokens with newlines survive transport losslessly. |
 | 15    | Personality & prompt system | code complete | `recall/prompts.py` (all prompts + `MEMEX_VOICE` + `SAVE_ACKS`); `llm.save_ack()` replaces fixed "Saved." in CLI + API. No-hallucination short-circuits unchanged. |
-| 16    | Natural-language forget     | planned (docs) | 4th intent `forget`; resolve by time (temporal) or detail (semantic ≥0.6); **two-step confirm via `confirm_forget`/`forget_candidates`**; `store.delete_memories`. Never delete on first turn. |
+| 16    | Natural-language forget     | code complete | 4th intent `forget`; router heuristic + 4-way classifier; `store.delete_memories`; two-step confirm (`confirm_forget`/`forget_candidates`) in API; `fc` SSE frame captured by `postChatStream`; `ForgetConfirm.tsx`; CLI bare-text forget flow with y/N prompt. |
 | 17    | Richer chat UI & theme depth | planned (docs) | remove standing "TODAY" divider (only between differing dates); welcoming empty state + suggestion chips; `RecentMemories` cards from `getMemories`; elevation/depth tokens. |
 | 18    | Settings menu & dark mode   | planned (docs) | `SettingsMenu` dropdown by logout; **real dark mode = tokenise hardcoded hex** (`AuthForm` `#00236f`, `MessageBubble` `bg-white`); `data-theme` + no-flash script; `web/lib/theme.ts`. |
 | 19    | Memory Library              | planned (docs) | `/library` route; `PATCH /memories/{id}` (re-embed), pin via `metadata.pinned`; browse/search/edit/delete/pin. |
@@ -94,6 +94,21 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-03 — Phase 16 implemented
+- **`recall/models.py`** — `Intent` extended to `Literal["store", "query", "general", "forget"]`.
+- **`recall/prompts.py`** — `_INTENT_SYSTEM` updated to 4-way classifier; FORGET label + 2 examples added.
+- **`recall/llm.py`** — `classify_intent` parser maps `"FORGET"` → `"forget"`.
+- **`recall/router.py`** — forget heuristic (starts with `forget `/`delete `/`remove ` or contains `forget what i`/`forget everything` etc.) inserted before query heuristic.
+- **`recall/store.py`** — `delete_memories(client, ids, user_id) -> int` batch-deletes by id list, scoped to user_id.
+- **`api/routers/chat.py`** — `ChatRequest` gains `confirm_forget: list[str] | None`; `ChatResponse` gains `forget_candidates: list[dict] | None`. `_resolve_forget_candidates` resolves by "forget all" → list_memories, temporal range → list_memories_in_range, or semantic search (similarity ≥ 0.6). Non-streaming and streaming paths both handle forget (step 1: return candidates; step 2 via `confirm_forget`: delete). Streaming emits `_sse({"fc": candidates})` frame for client capture. Confirm-delete short-circuits routing.
+- **`recall/cli.py`** — `_do_forget_natural` resolves candidates (all / temporal / semantic), prints a table, prompts `y/N`, calls `store.delete_memories` on confirm. Wired into bare-text dispatch.
+- **`web/types/index.ts`** — `ForgetCandidate` interface; `Message.forgetCandidates` field.
+- **`web/lib/api.ts`** — `postChat` accepts `opts.confirmForget`; `postChatStream` accepts `onForgetCandidates` callback; `fc` SSE frames call the callback.
+- **`web/components/ui/Icon.tsx`** — `delete` (trash) icon added.
+- **`web/components/chat/ForgetConfirm.tsx`** (new) — confirm card with candidate list, Delete (red) and Keep buttons.
+- **`web/app/chat/page.tsx`** — `pendingForget` state captures candidates from stream `fc` frame; `handleForgetConfirm` POSTs confirm step; `handleForgetCancel` appends "Okay, kept them." `ForgetConfirm` rendered as fixed overlay above the input when `pendingForget` is set.
+- TypeScript check passes clean. Never deletes on first turn; all deletes scoped by `user_id`.
 
 ### 2026-06-03 — Phase 15 implemented
 - **`recall/prompts.py`** (new) — single source of truth for all LLM prompts. Contains `MEMEX_VOICE` preamble (warm, concise, quietly clever), `_NO_MEMORIES`, `_SYSTEM_PROMPT` (synthesis + voice appended), `_INTENT_SYSTEM` (classifier — voice deliberately excluded, must stay deterministic), `_PERSONA_PROMPT` (general handler + voice appended), `_SUMMARY_SYSTEM` (temporal window + voice appended), and `SAVE_ACKS` (10-item rotation list).

@@ -1,3 +1,4 @@
+import re as _re
 import sys
 from datetime import datetime
 
@@ -9,6 +10,16 @@ from rich import box
 
 from recall.config import Config, ConfigError, load_config
 from recall import auth, embeddings, llm, router, store, temporal
+
+_FORGET_ALL_RE = _re.compile(
+    r"\bforget\s+(everything|all(\s+my)?\s+memories?|it\s+all)\b", _re.IGNORECASE
+)
+_FORGET_VERB_RE = _re.compile(
+    r"^(forget|delete|remove)\s+"
+    r"(what\s+i\s+(said|saved|told\s+(you\s+)?)(\s*about\s+)?"
+    r"|the\s+memory\s+(of\s+|about\s+)?)?",
+    _re.IGNORECASE,
+)
 
 console = Console()
 
@@ -52,6 +63,49 @@ def _do_query(text: str, cfg: Config, client: Client) -> None:
     console.print(f"[bold]bot \u203a[/bold] {answer}")
 
 
+def _do_forget_natural(text: str, cfg: Config, client: Client) -> None:
+    if _FORGET_ALL_RE.search(text):
+        candidates = store.list_memories(client, cfg.user_id)
+    else:
+        rng = temporal.extract_range(text, now=datetime.now().astimezone())
+        if rng:
+            start, end, _ = rng
+            candidates = store.list_memories_in_range(client, cfg.user_id, start, end)
+        else:
+            target = _FORGET_VERB_RE.sub("", text).strip() or text
+            with console.status("[cyan]Searching...[/cyan]"):
+                emb = embeddings.embed(target, cfg, task_type="RETRIEVAL_QUERY")
+                results = store.search_memories(client, emb, cfg.user_id, cfg.top_k)
+            top = next((r for r in results if r.similarity >= 0.6), None)
+            candidates = [top] if top else []
+
+    if not candidates:
+        console.print("[dim]I don't have anything saved about that.[/dim]")
+        return
+
+    n = len(candidates)
+    console.print(f"[yellow]Found {n} {'memory' if n == 1 else 'memories'}:[/yellow]")
+    table = Table(box=box.ROUNDED)
+    table.add_column("Date", style="cyan")
+    table.add_column("Content")
+    for m in candidates:
+        table.add_row(m.created_at[:10], m.content)
+    console.print(table)
+
+    try:
+        confirm = input(f"Delete {'it' if n == 1 else 'them'}? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n[dim]Cancelled.[/dim]")
+        return
+
+    if confirm != "y":
+        console.print("[dim]Kept.[/dim]")
+        return
+
+    deleted = store.delete_memories(client, [m.id for m in candidates], cfg.user_id)
+    console.print(f"[green]Forgotten — removed {deleted}.[/green]")
+
+
 def _dispatch(line: str, cfg: Config, client: Client) -> bool:
     line = line.strip()
     if not line:
@@ -66,6 +120,8 @@ def _dispatch(line: str, cfg: Config, client: Client) -> bool:
                 with console.status("[cyan]Thinking...[/cyan]"):
                     reply = llm.chat_general(line, cfg)
                 console.print(f"[bold]bot \u203a[/bold] {reply}")
+            elif intent == "forget":
+                _do_forget_natural(line, cfg, client)
             else:
                 _do_query(line, cfg, client)
         except Exception as exc:

@@ -121,7 +121,11 @@ Terminal       → direct module calls →  Supabase + Gemini
 
 ## Current phase
 
-**Phase 11** — complete. All phases 0–11 implemented.
+> **Source of truth for phases:** `MEMORY.md` (read it first every session).
+>
+> `AGENTS.md` only snapshots architecture and conventions; phase completion, next-up work, and session notes live in `MEMORY.md`.
+
+**Phase 16** — complete. Next: **Phase 17 — Richer chat UI & theme depth**.
 
 ## CLI output
 

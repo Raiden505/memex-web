@@ -1,4 +1,4 @@
-import type { Message } from "@/types";
+import type { ForgetCandidate, Message } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -44,20 +44,23 @@ export async function getMemories(): Promise<Message[]> {
 }
 
 export async function postChat(
-  message: string
-): Promise<{ intent: string; reply: string; id: string | null; source: string | null }> {
+  message: string,
+  opts: { confirmForget?: string[] } = {}
+): Promise<{ intent: string; reply: string; id: string | null; source: string | null; forget_candidates?: ForgetCandidate[] }> {
   return fetchApi("/chat", {
     method: "POST",
     body: JSON.stringify({
       message,
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ...(opts.confirmForget !== undefined ? { confirm_forget: opts.confirmForget } : {}),
     }),
   });
 }
 
 export async function* postChatStream(
   message: string,
-  retries = 1
+  retries = 1,
+  onForgetCandidates?: (candidates: ForgetCandidate[]) => void
 ): AsyncGenerator<string, void, unknown> {
   const token = await getToken();
 
@@ -105,6 +108,10 @@ export async function* postChatStream(
             if (obj.error) {
               console.error("[stream] server error:", obj.error);
               throw new Error(obj.error);
+            }
+            if (obj.fc && onForgetCandidates) {
+              onForgetCandidates(obj.fc as ForgetCandidate[]);
+              continue;
             }
             if (obj.t !== undefined) {
               yield obj.t;
