@@ -7,7 +7,7 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 21 complete (Data ownership & insights). **Next: Phase 22 — Capture & reach.**
+- **Phase:** 22 complete (Capture & reach). **All planned phases complete.**
 - **Last worked on:** 2026-06-04
 - **Last agent action:** Phase 20 — `extract_due` in `temporal.py`; `tag_memory` in `llm.py`; `add_memory` extended with optional `metadata`; `update_metadata` + `list_due` in `store.py`; `GET /memories/due` (next 7 days + overdue); chat store branches compute due + enqueue tag background task (`BackgroundTasks`); CLI `_do_store` computes due + tags inline; frontend `MemoryMetadata` shared type; `getDueMemories()` in `api.ts`; Library page gets Due & Upcoming section, tag filter chips, and tag pills on each memory row. Also fixed dark mode: auth form inputs gained `text-on-surface`.
 - **Prior agent action:** Phase 15 — prompt system centralised in `recall/prompts.py`, `save_ack()` rotation.
@@ -40,7 +40,7 @@ Read this before touching any code. Write to it after every change.
 | 19    | Memory Library              | complete  | `/library` route; `PATCH /memories/{id}` re-embeds; `POST /memories/{id}/pin`; `GET /memories/count`; client search/filters; inline edit/delete confirm; pinned-first sort. |
 | 20    | Organisation & reminders    | complete       | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
 | 21    | Data ownership & insights   | complete       | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
-| 22    | Capture & reach             | planned (docs) | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
+| 22    | Capture & reach             | complete       | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
 
 ---
 
@@ -94,6 +94,21 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-04 — Phase 22 implemented
+- **`api/routers/memories.py`** — `POST /memories` now embeds content, extracts due date, inserts with initial metadata, and enqueues `_apply_tags_bg` background task (same pattern as chat route); added `_apply_tags_bg` helper; imports `BackgroundTasks`, `llm`, `temporal`.
+- **`web/lib/api.ts`** — added `createMemory(content)` calling `POST /memories`.
+- **`web/components/ui/Icon.tsx`** — added `close`, `mic`, `mic_off` SVG icons.
+- **`web/components/chat/ChatInput.tsx`** — added `captureMode`/`onExitCapture` props: in capture mode shows "Save" badge + × button and changes placeholder; added voice input via Web Speech API (`window.SpeechRecognition || webkitSpeechRecognition`), feature-detected at module level; mic button hidden when unsupported; listening state drives mic/mic_off toggle + animate-pulse; `any` casts for untyped browser API.
+- **`web/components/ui/CommandPalette.tsx`** (new) — modal opened by `Cmd/Ctrl+K`; four commands: Quick save, Open Library, Today's digest, Toggle theme (cycles light→dark→system); controlled `query` filter; arrow key + Enter keyboard nav; `active` index; closes on Escape/outside-click.
+- **`web/components/chat/ChatLayout.tsx`** — added `"use client"` + optional `onCapture` prop threaded to `TopBar`.
+- **`web/components/ui/TopBar.tsx`** — added optional `onCapture` prop; renders `add_circle` button (titled "Quick save (C)") when provided, left of SettingsMenu.
+- **`web/app/chat/page.tsx`** — added `captureMode` + `paletteOpen` state; imported `createMemory` + `CommandPalette`; `SAVE_ACKS` client-side pool; `handleCapture` activates capture mode + focuses input; `handleSend` branches on `captureMode` (calls `createMemory`, shows random ack, optimistic UI); global `keydown` effect: `c` (outside input) → capture mode, `Cmd/Ctrl+K` → palette toggle, `Escape` → exit capture; `CommandPalette` rendered with `onDigest` wired to `handleSuggestion`.
+- **`web/app/manifest.ts`** (new) — `MetadataRoute.Manifest`: name Memex, `start_url /chat`, `display standalone`, `theme_color #00236f`, SVG icon.
+- **`web/public/icon.svg`** (new) — rounded-rect "M" brand icon (512×512, dark blue bg).
+- **`web/public/sw.js`** (new) — network-first service worker; caches HTML navigation responses as visited; serves from cache when offline; cleans up old caches on activate.
+- **`web/app/layout.tsx`** — SW registration script added inline alongside existing no-flash theme script.
+- TypeScript check passes clean.
 
 ### 2026-06-04 — Phase 21 implemented
 - **`recall/store.py`** — added `content_exists(client, user_id, content) -> bool` (ilike check for de-dup).

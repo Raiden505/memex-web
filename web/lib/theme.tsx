@@ -24,16 +24,19 @@ function resolveTheme(theme: Theme): "light" | "dark" {
   return theme;
 }
 
-function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "system";
-  const raw = localStorage.getItem("theme");
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
-  return "system";
-}
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => getInitialTheme());
+  // Always start with "system" so server and client render identically.
+  // The no-flash script in layout.tsx handles visual theme before React hydrates.
+  const [theme, setThemeState] = useState<Theme>("system");
   const resolved = useMemo(() => resolveTheme(theme), [theme]);
+
+  // Sync from localStorage after hydration
+  useEffect(() => {
+    const raw = localStorage.getItem("theme");
+    if (raw === "light" || raw === "dark" || raw === "system") {
+      setThemeState(raw);
+    }
+  }, []);
 
   // Apply resolved theme to document
   useEffect(() => {

@@ -32,6 +32,13 @@ async function fetchApi<T>(
   return res.json();
 }
 
+export async function createMemory(content: string): Promise<{ id: string; created_at: string }> {
+  return fetchApi("/memories", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
+
 export async function getMemories(): Promise<Message[]> {
   const data: { id: string; content: string; created_at: string; metadata?: MemoryMetadata | null }[] =
     await fetchApi("/memories");

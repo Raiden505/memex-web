@@ -1,11 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Icon from "@/components/ui/Icon";
 import SettingsMenu from "@/components/ui/SettingsMenu";
 
-export default function TopBar() {
+interface TopBarProps {
+  onCapture?: () => void;
+}
+
+export default function TopBar({ onCapture }: TopBarProps) {
+  const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,6 +37,24 @@ export default function TopBar() {
           <Icon name="auto_awesome" size={16} className="text-tertiary" />
         </div>
         <div className="flex items-center gap-1">
+          {onCapture && (
+            <button
+              onClick={onCapture}
+              className="p-2 text-on-surface-variant hover:text-primary hover:opacity-80 transition-all active:scale-95 duration-200 cursor-pointer"
+              aria-label="Quick save"
+              title="Quick save (C)"
+            >
+              <Icon name="add_circle" size={24} />
+            </button>
+          )}
+          <button
+            onClick={() => router.push("/library")}
+            className="p-2 text-on-surface-variant hover:text-primary hover:opacity-80 transition-all active:scale-95 duration-200 cursor-pointer"
+            aria-label="Memory Library"
+            title="Memory Library"
+          >
+            <Icon name="library" size={24} />
+          </button>
           <SettingsMenu email={email} />
           <button
             onClick={handleSignOut}

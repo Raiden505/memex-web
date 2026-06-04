@@ -1,16 +1,25 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from supabase import Client
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from api.dependencies import get_current_user, get_db
-from recall import embeddings, store
+from recall import embeddings, llm, store, temporal
 from recall.config import load_config
 from recall.models import Memory
 
 router = APIRouter()
 _cfg = load_config()
+
+
+def _apply_tags_bg(mem_id: str, content: str, user_id: str, db: Client) -> None:
+    try:
+        tags = llm.tag_memory(content, _cfg)
+        if tags:
+            store.update_metadata(db, mem_id, user_id, {"tags": tags})
+    except Exception:
+        pass
 
 
 class StoreRequest(BaseModel):
@@ -44,13 +53,18 @@ class ImportRequest(BaseModel):
 @router.post("", status_code=201)
 async def create_memory(
     body: StoreRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user),
     db: Client = Depends(get_db),
 ) -> dict:
     try:
-        row = store.add_memory(db, body.content, None, user_id)
+        embedding = embeddings.embed(body.content, _cfg, task_type="RETRIEVAL_DOCUMENT")
+        due = temporal.extract_due(body.content)
+        initial_meta = {"due": due.isoformat()} if due else None
+        row = store.add_memory(db, body.content, embedding, user_id, metadata=initial_meta)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to store memory: {exc}")
+    background_tasks.add_task(_apply_tags_bg, row["id"], body.content, user_id, db)
     return {"id": row["id"], "created_at": row["created_at"]}
 
 

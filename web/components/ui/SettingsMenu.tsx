@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useTheme } from "@/lib/theme";
 import { exportMemories, importMemories } from "@/lib/api";
 import Icon from "@/components/ui/Icon";
@@ -11,7 +10,6 @@ interface SettingsMenuProps {
 }
 
 export default function SettingsMenu({ email }: SettingsMenuProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -100,19 +98,19 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-outline-variant/50 bg-surface-container-lowest p-2 shadow-lg elevation-3 z-50"
+          className="absolute right-0 top-full mt-1.5 w-52 rounded-xl border border-outline-variant/50 bg-surface-container-lowest p-1.5 shadow-lg elevation-3 z-50"
           role="menu"
         >
           {/* Appearance */}
-          <div className="px-3 py-2">
-            <p className="font-label-md text-label-md text-outline mb-2">Appearance</p>
-            <div className="flex gap-1 bg-surface-container rounded-lg p-1">
+          <div className="px-2.5 py-1.5">
+            <p className="text-sm text-outline mb-1.5">Appearance</p>
+            <div className="flex gap-0.5 bg-surface-container rounded-lg p-0.5">
               {themes.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTheme(t.key)}
                   role="menuitem"
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-md py-1.5 font-label-md text-label-md transition-colors cursor-pointer ${
+                  className={`flex-1 flex items-center justify-center rounded-md py-1 text-sm transition-colors cursor-pointer ${
                     theme === t.key
                       ? "bg-surface-container-lowest text-primary shadow-sm"
                       : "text-on-surface-variant hover:text-on-surface"
@@ -124,33 +122,24 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
             </div>
           </div>
 
-          <div className="my-1 border-t border-outline-variant/30" />
+          <div className="my-0.5 border-t border-outline-variant/30" />
 
           {/* Account */}
           {email && (
-            <div className="px-3 py-2">
-              <p className="font-metadata text-metadata text-outline mb-1">Signed in as</p>
-              <p className="font-body-md text-body-md text-on-surface truncate">{email}</p>
+            <div className="px-2.5 py-1.5">
+              <p className="text-[13px] text-outline mb-0.5">Signed in as</p>
+              <p className="text-[15px] text-on-surface truncate">{email}</p>
             </div>
           )}
 
-          <div className="my-1 border-t border-outline-variant/30" />
+          <div className="my-0.5 border-t border-outline-variant/30" />
 
           {/* Actions */}
           <ul role="none">
             <li>
               <button
                 role="menuitem"
-                className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
-                onClick={() => { setOpen(false); router.push("/library"); }}
-              >
-                Memory Library
-              </button>
-            </li>
-            <li>
-              <button
-                role="menuitem"
-                className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[15px] text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
                 onClick={handleExport}
               >
                 Export my data
@@ -160,7 +149,7 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
               <button
                 role="menuitem"
                 disabled={importing}
-                className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-50"
+                className="w-full text-left px-2.5 py-1.5 rounded-lg text-[15px] text-on-surface hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-50"
                 onClick={() => fileInputRef.current?.click()}
               >
                 {importing ? "Importing…" : "Import memories"}
@@ -178,17 +167,17 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
           />
 
           {importStatus && (
-            <p className="px-3 pb-1 font-metadata text-metadata text-secondary">
+            <p className="px-2.5 pb-1 text-[13px] text-secondary">
               {importStatus}
             </p>
           )}
 
-          <div className="my-1 border-t border-outline-variant/30" />
+          <div className="my-0.5 border-t border-outline-variant/30" />
 
           {/* About */}
-          <div className="px-3 py-2">
-            <p className="font-metadata text-metadata text-outline">Memex v0.21</p>
-            <p className="font-metadata text-metadata text-outline-variant mt-0.5">
+          <div className="px-2.5 py-1.5">
+            <p className="text-sm text-outline">Memex v0.21</p>
+            <p className="text-xs leading-relaxed text-outline-variant mt-0.5">
               Your memories are stored in Supabase (EU region). AI responses are processed by Google Gemini — on the free tier, prompts may be used to improve Google's models. No data is shared with third parties beyond Supabase and Google.
             </p>
           </div>

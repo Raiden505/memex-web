@@ -9,7 +9,10 @@ import ChatInput, { type ChatInputHandle } from "@/components/chat/ChatInput";
 import EmptyState from "@/components/chat/EmptyState";
 import ForgetConfirm from "@/components/chat/ForgetConfirm";
 import SplashTransition from "@/components/ui/SplashTransition";
-import { postChat, postChatStream } from "@/lib/api";
+import CommandPalette from "@/components/ui/CommandPalette";
+import { postChat, postChatStream, createMemory } from "@/lib/api";
+
+const SAVE_ACKS = ["Got it — saved.", "Noted.", "Locked in.", "Saved that.", "Filed away.", "Remembered."];
 
 interface PendingForget {
   loadingId: string;
@@ -22,12 +25,46 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [booting, setBooting] = useState(true);
+  const [captureMode, setCaptureMode] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingForget, setPendingForget] = useState<PendingForget | null>(null);
   const inputRef = useRef<ChatInputHandle>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setBooting(false), 600);
     return () => clearTimeout(t);
+  }, []);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName ?? "";
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable;
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+
+      if (!inInput && e.key === "c" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        handleCapture();
+        return;
+      }
+
+      if (e.key === "Escape" && captureMode) {
+        setCaptureMode(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [captureMode]);
+
+  const handleCapture = useCallback(() => {
+    setCaptureMode(true);
+    setPaletteOpen(false);
+    setTimeout(() => inputRef.current?.focus(), 10);
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -60,6 +97,20 @@ export default function ChatPage() {
         prev.map((m) => (m.id === loadingId ? { ...m, content, isError, pending: false } : m))
       );
     };
+
+    // Quick capture: always store, no routing
+    if (captureMode) {
+      try {
+        await createMemory(text);
+        replaceLoading(SAVE_ACKS[Math.floor(Math.random() * SAVE_ACKS.length)]);
+      } catch {
+        replaceLoading("Couldn't save — try again.", true);
+      } finally {
+        setLoading(false);
+        if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
+      }
+      return;
+    }
 
     try {
       let captured: ForgetCandidate[] | null = null;
@@ -102,7 +153,7 @@ export default function ChatPage() {
         inputRef.current?.focus();
       }
     }
-  }, [input, loading]);
+  }, [input, loading, captureMode]);
 
   const handleSuggestion = useCallback(
     (text: string) => {
@@ -154,7 +205,7 @@ export default function ChatPage() {
   }, [pendingForget]);
 
   return (
-    <ChatLayout>
+    <ChatLayout onCapture={handleCapture}>
       {booting ? (
         <SplashTransition />
       ) : messages.length === 0 ? (
@@ -173,7 +224,21 @@ export default function ChatPage() {
           </div>
         </div>
       )}
-      <ChatInput ref={inputRef} value={input} onChange={setInput} onSend={handleSend} loading={loading} />
+      <ChatInput
+        ref={inputRef}
+        value={input}
+        onChange={setInput}
+        onSend={handleSend}
+        loading={loading}
+        captureMode={captureMode}
+        onExitCapture={() => setCaptureMode(false)}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onCapture={handleCapture}
+        onDigest={() => handleSuggestion("What did I save today?")}
+      />
     </ChatLayout>
   );
 }

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getMemories, getDueMemories, updateMemory, deleteMemory, setPinned, getMemoryCount } from "@/lib/api";
-import type { Memory, Message } from "@/types";
+import { getMemories, updateMemory, deleteMemory, setPinned, getMemoryCount } from "@/lib/api";
+import type { Message } from "@/types";
 import Icon from "@/components/ui/Icon";
 
 const ALL_TAGS = ["idea", "task", "person", "place", "work", "personal", "date", "misc"] as const;
@@ -21,17 +21,6 @@ function relativeDate(date: Date): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
-function formatDue(dueIso: string): { label: string; overdue: boolean } {
-  const due = new Date(dueIso + (dueIso.endsWith("Z") ? "" : "Z"));
-  const now = new Date();
-  const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000);
-
-  if (diffDays < -1) return { label: `${-diffDays}d overdue`, overdue: true };
-  if (diffDays <= 0) return { label: "due today", overdue: false };
-  if (diffDays === 1) return { label: "due tomorrow", overdue: false };
-  return { label: `due in ${diffDays}d`, overdue: false };
 }
 
 function isInTimeWindow(date: Date, window: string): boolean {
@@ -184,63 +173,9 @@ function MemoryRow({ memory, onUpdate, onDelete, onPinToggle }: MemoryRowProps) 
   );
 }
 
-interface DueRowProps {
-  memory: Memory;
-  onDelete: (id: string) => void;
-}
-
-function DueRow({ memory, onDelete }: DueRowProps) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const { label, overdue } = formatDue(memory.metadata?.due ?? "");
-
-  return (
-    <div className="flex items-start gap-3 p-3 rounded-xl border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container transition-colors">
-      <div className="flex-1 min-w-0">
-        <p className="font-body-md text-body-md text-on-surface break-words line-clamp-2">
-          {memory.content}
-        </p>
-        <span
-          className={`font-metadata text-metadata mt-1 block ${overdue ? "text-error" : "text-secondary"}`}
-        >
-          {label}
-        </span>
-      </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        {confirmDelete ? (
-          <div className="flex items-center gap-1">
-            <span className="font-metadata text-metadata text-error mr-1">Delete?</span>
-            <button
-              onClick={() => { setConfirmDelete(false); onDelete(memory.id); }}
-              className="px-2 py-1 rounded-md bg-error text-on-error font-label-md text-label-md cursor-pointer"
-            >
-              Yes
-            </button>
-            <button
-              onClick={() => setConfirmDelete(false)}
-              className="px-2 py-1 rounded-md bg-surface-container text-on-surface font-label-md text-label-md cursor-pointer"
-            >
-              No
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="p-2 rounded-lg text-outline hover:text-error hover:bg-error/10 transition-colors cursor-pointer"
-            aria-label="Delete memory"
-            title="Delete"
-          >
-            <Icon name="delete" size={18} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function LibraryPage() {
   const router = useRouter();
   const [memories, setMemories] = useState<Message[] | null>(null);
-  const [dueMemories, setDueMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [timeWindow, setTimeWindow] = useState("all");
@@ -248,11 +183,10 @@ export default function LibraryPage() {
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    Promise.all([getMemories(), getMemoryCount(), getDueMemories()])
-      .then(([mems, count, due]) => {
+    Promise.all([getMemories(), getMemoryCount()])
+      .then(([mems, count]) => {
         setMemories(mems);
         setTotal(count);
-        setDueMemories(due);
         setLoading(false);
       })
       .catch(() => {
@@ -271,19 +205,6 @@ export default function LibraryPage() {
     }
     return counts;
   }, [memories]);
-
-  const addedLast30d = useMemo(() => {
-    if (!memories) return 0;
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    return memories.filter((m) => m.date.getTime() >= cutoff).length;
-  }, [memories]);
-
-  const topTags = useMemo(() => {
-    return Object.entries(tagCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([tag]) => tag);
-  }, [tagCounts]);
 
   const filtered = useMemo(() => {
     if (!memories) return [];
@@ -320,7 +241,6 @@ export default function LibraryPage() {
   const handleDelete = useCallback(async (id: string) => {
     await deleteMemory(id);
     setMemories((prev) => prev ? prev.filter((m) => m.id !== id) : prev);
-    setDueMemories((prev) => prev.filter((m) => m.id !== id));
     setTotal((t) => Math.max(0, t - 1));
   }, []);
 
@@ -353,35 +273,7 @@ export default function LibraryPage() {
       {/* Main content */}
       <main className="chat-container flex-1 px-6 pt-24 pb-10">
 
-        {/* Due & Upcoming section */}
-        {!loading && dueMemories.length > 0 && (
-          <section className="mb-8">
-            <div className="flex items-center gap-2 mb-3">
-              <h2 className="font-label-md text-label-md text-on-surface">Due & Upcoming</h2>
-              <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-metadata text-metadata">
-                {dueMemories.length}
-              </span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {dueMemories.map((m) => (
-                <DueRow key={m.id} memory={m} onDelete={handleDelete} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Insights bar */}
-        {!loading && memories && memories.length > 0 && (
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mb-6 font-metadata text-metadata text-outline">
-            <span>{total} memories</span>
-            <span>{addedLast30d} added this month</span>
-            {topTags.length > 0 && (
-              <span>top tags: {topTags.join(", ")}</span>
-            )}
-          </div>
-        )}
-
-        {/* Search + time filter */}
+          {/* Search + time filter */}
         <div className="flex flex-col sm:flex-row gap-3 mb-3">
           <div className="relative flex-1">
             <Icon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
