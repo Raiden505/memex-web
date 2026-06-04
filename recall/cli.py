@@ -42,8 +42,16 @@ def _show_help() -> None:
 def _do_store(text: str, cfg: Config, client: Client) -> None:
     with console.status("[cyan]Saving...[/cyan]"):
         embedding = embeddings.embed(text, cfg, task_type="RETRIEVAL_DOCUMENT")
-        row = store.add_memory(client, text, embedding, cfg.user_id)
+        due = temporal.extract_due(text)
+        initial_meta = {"due": due.isoformat()} if due else None
+        row = store.add_memory(client, text, embedding, cfg.user_id, metadata=initial_meta)
     console.print(f"[green]{llm.save_ack()}[/green] [dim](id: {row['id']})[/dim]")
+    try:
+        tags = llm.tag_memory(text, cfg)
+        if tags:
+            store.update_metadata(client, row["id"], cfg.user_id, {"tags": tags})
+    except Exception:
+        pass
 
 
 def _do_query(text: str, cfg: Config, client: Client) -> None:

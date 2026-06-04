@@ -1,4 +1,4 @@
-import type { ForgetCandidate, Message } from "@/types";
+import type { ForgetCandidate, Memory, MemoryMetadata, Message } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -33,7 +33,7 @@ async function fetchApi<T>(
 }
 
 export async function getMemories(): Promise<Message[]> {
-  const data: { id: string; content: string; created_at: string; metadata?: { pinned?: boolean } | null }[] =
+  const data: { id: string; content: string; created_at: string; metadata?: MemoryMetadata | null }[] =
     await fetchApi("/memories");
   return data.map((m) => ({
     id: m.id,
@@ -42,6 +42,33 @@ export async function getMemories(): Promise<Message[]> {
     date: new Date(m.created_at),
     metadata: m.metadata,
   }));
+}
+
+export async function exportMemories(): Promise<{ content: string; created_at: string; metadata?: MemoryMetadata | null }[]> {
+  return fetchApi("/memories/export");
+}
+
+export async function importMemories(
+  items: { content: string }[]
+): Promise<{ imported: number; skipped: number }> {
+  return fetchApi("/memories/import", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
+
+export async function getStats(): Promise<{
+  total: number;
+  added_last_30d: number;
+  top_tags: { tag: string; count: number }[];
+}> {
+  return fetchApi("/memories/stats");
+}
+
+export async function getDueMemories(): Promise<Memory[]> {
+  const data: { id: string; content: string; created_at: string; metadata?: MemoryMetadata | null }[] =
+    await fetchApi("/memories/due");
+  return data;
 }
 
 export async function getMemoryCount(): Promise<number> {

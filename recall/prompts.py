@@ -51,6 +51,13 @@ _SUMMARY_SYSTEM = (
     + MEMEX_VOICE
 )
 
+_TAG_SYSTEM = (
+    "Classify the following text into one or more labels from this exact list: "
+    "idea, task, person, place, work, personal, date, misc.\n"
+    "Reply ONLY with a comma-separated list of applicable labels — no other text, "
+    "no punctuation besides commas. Example: task, work"
+)
+
 SAVE_ACKS = [
     "Got it — saved.",
     "Noted.",

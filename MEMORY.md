@@ -7,9 +7,9 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 19 complete (Memory Library). **Next: Phase 20 — Organisation & reminders.**
-- **Last worked on:** 2026-06-03
-- **Last agent action:** Phase 19 — `/library` route with auth guard; `PATCH /memories/{id}` re-embeds content; `POST /memories/{id}/pin` toggles pinned via `metadata` jsonb; `GET /memories/count`; client-side search + time-window filters; inline edit with textarea + Enter-to-save/Escape-to-cancel; delete with inline yes/no confirm; `RecentMemories` sorts pinned-first; `SettingsMenu` links to `/library`; new icons (`arrow_back`, `edit`, `pin`, `search`).
+- **Phase:** 21 complete (Data ownership & insights). **Next: Phase 22 — Capture & reach.**
+- **Last worked on:** 2026-06-04
+- **Last agent action:** Phase 20 — `extract_due` in `temporal.py`; `tag_memory` in `llm.py`; `add_memory` extended with optional `metadata`; `update_metadata` + `list_due` in `store.py`; `GET /memories/due` (next 7 days + overdue); chat store branches compute due + enqueue tag background task (`BackgroundTasks`); CLI `_do_store` computes due + tags inline; frontend `MemoryMetadata` shared type; `getDueMemories()` in `api.ts`; Library page gets Due & Upcoming section, tag filter chips, and tag pills on each memory row. Also fixed dark mode: auth form inputs gained `text-on-surface`.
 - **Prior agent action:** Phase 15 — prompt system centralised in `recall/prompts.py`, `save_ack()` rotation.
 
 ---
@@ -38,8 +38,8 @@ Read this before touching any code. Write to it after every change.
 | 17    | Richer chat UI & theme depth | complete | remove standing "TODAY" divider (only between differing dates); welcoming empty state + suggestion chips; `RecentMemories` cards from `getMemories`; elevation/depth tokens. |
 | 18    | Settings menu & dark mode   | complete | `SettingsMenu` dropdown by logout; **real dark mode = tokenise hardcoded hex** (`AuthForm` `#00236f`, `MessageBubble` `bg-white`); `data-theme` + no-flash script; `web/lib/theme.ts`. |
 | 19    | Memory Library              | complete  | `/library` route; `PATCH /memories/{id}` re-embeds; `POST /memories/{id}/pin`; `GET /memories/count`; client search/filters; inline edit/delete confirm; pinned-first sort. |
-| 20    | Organisation & reminders    | planned (docs) | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
-| 21    | Data ownership & insights   | planned (docs) | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
+| 20    | Organisation & reminders    | complete       | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
+| 21    | Data ownership & insights   | complete       | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
 | 22    | Capture & reach             | planned (docs) | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
 
 ---
@@ -94,6 +94,28 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-04 — Phase 21 implemented
+- **`recall/store.py`** — added `content_exists(client, user_id, content) -> bool` (ilike check for de-dup).
+- **`api/routers/memories.py`** — added `GET /memories/export` (full memory list as JSON), `POST /memories/import` (per-item exact-match then cosine ≥ 0.97 de-dup, returns `{imported, skipped}`), `GET /memories/stats` (`total`, `added_last_30d`, `top_tags` computed in Python from list_memories). All three endpoints positioned before `/{mem_id}` routes to avoid path conflicts.
+- **`web/lib/api.ts`** — added `exportMemories()`, `importMemories(items)`, `getStats()`.
+- **`web/components/ui/SettingsMenu.tsx`** — "Export my data" triggers real JSON download via `Blob + URL.createObjectURL`; "Import memories" triggers hidden `<input type=file accept=.json>` ref; on file selection, parses JSON, calls `importMemories`, shows `importStatus` inline ("Imported X, skipped Y." or error); version bumped to v0.21; About section updated with explicit Supabase/Gemini free-tier privacy copy.
+- **`web/app/library/page.tsx`** — added `addedLast30d` and `topTags` memos computed from existing `memories` state (no extra API call); insights bar rendered above search filters showing "X memories · Y added this month · top tags: …" (hidden when loading or empty).
+- Daily digest (R21.4): handled by existing temporal chat flow ("what did I save today?" → temporal recall path). No new UI button needed.
+- TypeScript check passes, Python syntax valid.
+
+### 2026-06-04 — Phase 20 implemented
+- **`recall/prompts.py`** — added `_TAG_SYSTEM` (closed-label-set tagger prompt, temperature 0).
+- **`recall/temporal.py`** — added `_FUTURE_DAYS_RE`, `_MONTH_MAP`, `_MONTH_NAMES_RE`; new `extract_due(text, tz, now)` returning naive UTC datetime for first future date found. Patterns: "tomorrow", "in N days/weeks/months", "next week", "next month", "next/on [weekday]", "[Month] [Day]", ISO date. Returns None for past dates or no match.
+- **`recall/llm.py`** — imported `_TAG_SYSTEM`; defined `_VALID_TAGS` frozenset; new `tag_memory(content, cfg) -> list[str]` (temp 0, filters to closed set, swallows exceptions).
+- **`recall/store.py`** — `add_memory` gains optional `metadata: dict | None = None`; new `update_metadata(client, mem_id, user_id, updates)` (fetch-merge-update); new `list_due(client, user_id, before)` filtering `metadata->>due` not-null + lte.
+- **`api/routers/memories.py`** — imported `datetime/timedelta/timezone`; added `GET /memories/due` returning memories due in next 7 days + overdue (positioned before `/{mem_id}` variants to avoid route conflict).
+- **`api/routers/chat.py`** — imported `BackgroundTasks`; added `_apply_tags_bg` background helper; `chat` endpoint gains `background_tasks` param; both non-streaming and streaming store branches now compute `extract_due`, write initial metadata, enqueue `_apply_tags_bg`.
+- **`recall/cli.py`** — `_do_store` computes `extract_due` + passes initial metadata; tags computed inline after ack, swallowed on failure.
+- **`web/types/index.ts`** — extracted `MemoryMetadata` interface (pinned, tags, due); `Message` and `Memory` use it.
+- **`web/lib/api.ts`** — imported `MemoryMetadata`; `getMemories` uses it; added `getDueMemories()` (`GET /memories/due`).
+- **`web/app/library/page.tsx`** — rewrote: `DueRow` component with overdue/upcoming label; `Due & Upcoming` section at top of main (hidden when empty); tag filter chips row (All + 8 closed-set tags with counts, disabled when count=0); tag pills in `MemoryRow` below content; `selectedTag` filter state; `tagCounts` memo; `handleDelete` also removes from `dueMemories`.
+- TypeScript check passes, Python syntax valid.
 
 ### 2026-06-03 — Phase 19 implemented
 - **Backend:**

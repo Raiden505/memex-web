@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from supabase import Client
@@ -5,6 +7,7 @@ from supabase import Client
 from api.dependencies import get_current_user, get_db
 from recall import embeddings, store
 from recall.config import load_config
+from recall.models import Memory
 
 router = APIRouter()
 _cfg = load_config()
@@ -27,6 +30,15 @@ class UpdateRequest(BaseModel):
 
 class PinRequest(BaseModel):
     pinned: bool
+
+
+class ImportItem(BaseModel):
+    content: str
+    created_at: str | None = None
+
+
+class ImportRequest(BaseModel):
+    items: list[ImportItem]
 
 
 @router.post("", status_code=201)
@@ -85,6 +97,83 @@ async def pin_memory(
     if not row:
         raise HTTPException(status_code=404, detail="not found")
     return {"id": row["id"], "pinned": body.pinned}
+
+
+@router.get("/export")
+async def export_memories(
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> list[dict]:
+    try:
+        memories = store.list_memories(db, user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}")
+    return [
+        {"content": m.content, "created_at": m.created_at, "metadata": m.metadata}
+        for m in memories
+    ]
+
+
+@router.post("/import")
+async def import_memories(
+    body: ImportRequest,
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> dict:
+    imported = 0
+    skipped = 0
+    for item in body.items:
+        try:
+            if store.content_exists(db, user_id, item.content):
+                skipped += 1
+                continue
+            embedding = embeddings.embed(item.content, _cfg, task_type="RETRIEVAL_DOCUMENT")
+            results = store.search_memories(db, embedding, user_id, k=1)
+            if results and results[0].similarity >= 0.97:
+                skipped += 1
+                continue
+            store.add_memory(db, item.content, embedding, user_id)
+            imported += 1
+        except Exception:
+            skipped += 1
+    return {"imported": imported, "skipped": skipped}
+
+
+@router.get("/stats")
+async def memory_stats(
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> dict:
+    try:
+        all_mems = store.list_memories(db, user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Stats failed: {exc}")
+    total = len(all_mems)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    added_last_30d = sum(1 for m in all_mems if m.created_at >= cutoff)
+    tag_counts: dict[str, int] = {}
+    for m in all_mems:
+        for tag in (m.metadata or {}).get("tags") or []:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    top_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+    return {
+        "total": total,
+        "added_last_30d": added_last_30d,
+        "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+    }
+
+
+@router.get("/due")
+async def due_memories(
+    user_id: str = Depends(get_current_user),
+    db: Client = Depends(get_db),
+) -> list[MemoryOut]:
+    before = datetime.now(timezone.utc) + timedelta(days=7)
+    try:
+        memories = store.list_due(db, user_id, before)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to list due memories: {exc}")
+    return [MemoryOut(id=m.id, content=m.content, created_at=m.created_at, metadata=m.metadata) for m in memories]
 
 
 @router.get("/count")

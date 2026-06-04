@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/lib/theme";
+import { exportMemories, importMemories } from "@/lib/api";
 import Icon from "@/components/ui/Icon";
 
 interface SettingsMenuProps {
@@ -12,7 +13,10 @@ interface SettingsMenuProps {
 export default function SettingsMenu({ email }: SettingsMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
@@ -34,10 +38,52 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
     };
   }, [open]);
 
-  const themes: { key: "light" | "dark" | "system"; label: string; icon: string }[] = [
-    { key: "light", label: "Light", icon: "sun" },
-    { key: "dark", label: "Dark", icon: "moon" },
-    { key: "system", label: "System", icon: "monitor" },
+  const handleExport = async () => {
+    try {
+      const data = await exportMemories();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memex-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      // silent — download failure is obvious
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    setImportStatus(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const items: { content: string }[] = Array.isArray(parsed)
+        ? parsed.filter((x: unknown) => typeof (x as { content?: unknown }).content === "string").map((x: { content: string }) => ({ content: x.content }))
+        : [];
+      if (items.length === 0) {
+        setImportStatus("No valid memories found in file.");
+        return;
+      }
+      const result = await importMemories(items);
+      setImportStatus(`Imported ${result.imported}, skipped ${result.skipped}.`);
+    } catch {
+      setImportStatus("Import failed — check the file format.");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const themes: { key: "light" | "dark" | "system"; label: string }[] = [
+    { key: "light", label: "Light" },
+    { key: "dark", label: "Dark" },
+    { key: "system", label: "System" },
   ];
 
   return (
@@ -72,7 +118,7 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
                       : "text-on-surface-variant hover:text-on-surface"
                   }`}
                 >
-                  <span>{t.label}</span>
+                  {t.label}
                 </button>
               ))}
             </div>
@@ -96,10 +142,7 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
               <button
                 role="menuitem"
                 className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
-                onClick={() => {
-                  setOpen(false);
-                  router.push("/library");
-                }}
+                onClick={() => { setOpen(false); router.push("/library"); }}
               >
                 Memory Library
               </button>
@@ -108,23 +151,45 @@ export default function SettingsMenu({ email }: SettingsMenuProps) {
               <button
                 role="menuitem"
                 className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer"
-                onClick={() => {
-                  setOpen(false);
-                  alert("Export data — coming in Phase 21.");
-                }}
+                onClick={handleExport}
               >
                 Export my data
               </button>
             </li>
+            <li>
+              <button
+                role="menuitem"
+                disabled={importing}
+                className="w-full text-left px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface hover:bg-surface-container transition-colors cursor-pointer disabled:opacity-50"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {importing ? "Importing…" : "Import memories"}
+              </button>
+            </li>
           </ul>
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+
+          {importStatus && (
+            <p className="px-3 pb-1 font-metadata text-metadata text-secondary">
+              {importStatus}
+            </p>
+          )}
 
           <div className="my-1 border-t border-outline-variant/30" />
 
           {/* About */}
           <div className="px-3 py-2">
-            <p className="font-metadata text-metadata text-outline">Memex v0.17</p>
+            <p className="font-metadata text-metadata text-outline">Memex v0.21</p>
             <p className="font-metadata text-metadata text-outline-variant mt-0.5">
-              Your memories are stored securely. AI responses may not always be accurate.
+              Your memories are stored in Supabase (EU region). AI responses are processed by Google Gemini — on the free tier, prompts may be used to improve Google's models. No data is shared with third parties beyond Supabase and Google.
             </p>
           </div>
         </div>

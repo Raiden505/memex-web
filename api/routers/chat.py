@@ -2,7 +2,7 @@ import asyncio
 import json
 import re as _re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from supabase import Client
@@ -77,6 +77,15 @@ def _resolve_forget_candidates(message: str, user_id: str, db: Client, tz: str |
     return []
 
 
+def _apply_tags_bg(mem_id: str, content: str, user_id: str, db: Client) -> None:
+    try:
+        tags = llm.tag_memory(content, _cfg)
+        if tags:
+            store.update_metadata(db, mem_id, user_id, {"tags": tags})
+    except Exception:
+        pass
+
+
 def _forget_reply(n: int, is_all: bool) -> str:
     if n == 0:
         return "I don't have anything saved about that."
@@ -90,6 +99,7 @@ def _forget_reply(n: int, is_all: bool) -> str:
 @chat_router.post("")
 async def chat(
     body: ChatRequest,
+    background_tasks: BackgroundTasks,
     stream: bool = Query(False),
     user_id: str = Depends(get_current_user),
     db: Client = Depends(get_db),
@@ -121,7 +131,7 @@ async def chat(
 
     if stream:
         return StreamingResponse(
-            _stream_chat(body.message, intent, user_id, db, body.tz),
+            _stream_chat(body.message, intent, user_id, db, body.tz, background_tasks),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
@@ -129,7 +139,10 @@ async def chat(
     try:
         if intent == "store":
             embedding = embeddings.embed(body.message, _cfg, task_type="RETRIEVAL_DOCUMENT")
-            row = store.add_memory(db, body.message, embedding, user_id)
+            due = temporal.extract_due(body.message, tz=body.tz or "UTC")
+            initial_meta = {"due": due.isoformat()} if due else None
+            row = store.add_memory(db, body.message, embedding, user_id, metadata=initial_meta)
+            background_tasks.add_task(_apply_tags_bg, row["id"], body.message, user_id, db)
             return ChatResponse(intent="store", reply=llm.save_ack(), id=row["id"], source="memory")
 
         if intent == "general":
@@ -157,11 +170,16 @@ async def chat(
         raise HTTPException(status_code=500, detail=f"Chat failed: {exc}")
 
 
-async def _stream_chat(message: str, intent: str, user_id: str, db: Client, tz: str | None):
+async def _stream_chat(
+    message: str, intent: str, user_id: str, db: Client, tz: str | None, bg: BackgroundTasks
+):
     try:
         if intent == "store":
             embedding = embeddings.embed(message, _cfg, task_type="RETRIEVAL_DOCUMENT")
-            store.add_memory(db, message, embedding, user_id)
+            due = temporal.extract_due(message, tz=tz or "UTC")
+            initial_meta = {"due": due.isoformat()} if due else None
+            row = store.add_memory(db, message, embedding, user_id, metadata=initial_meta)
+            bg.add_task(_apply_tags_bg, row["id"], message, user_id, db)
             yield _sse({"t": llm.save_ack()})
             yield _sse({"done": True})
 

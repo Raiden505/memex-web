@@ -13,12 +13,33 @@ from recall.prompts import (
     _PERSONA_PROMPT,
     _SUMMARY_SYSTEM,
     _SYSTEM_PROMPT,
+    _TAG_SYSTEM,
 )
+
+_VALID_TAGS = frozenset({"idea", "task", "person", "place", "work", "personal", "date", "misc"})
 
 
 def save_ack(content: str | None = None, rng=None) -> str:
     chooser = rng if rng is not None else random
     return chooser.choice(SAVE_ACKS)
+
+
+def tag_memory(content: str, cfg: Config) -> list[str]:
+    try:
+        client = genai.Client(api_key=cfg.gemini_api_key)
+        response = client.models.generate_content(
+            model=cfg.chat_model,
+            contents=content,
+            config=types.GenerateContentConfig(
+                system_instruction=_TAG_SYSTEM,
+                temperature=0,
+            ),
+        )
+        raw = response.text.strip().lower()
+        parts = [p.strip() for p in raw.split(",")]
+        return [p for p in parts if p in _VALID_TAGS]
+    except Exception:
+        return []
 
 
 def synthesize_answer(question: str, memories: list[SearchResult], cfg: Config) -> str:

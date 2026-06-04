@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { getMemories, updateMemory, deleteMemory, setPinned, getMemoryCount } from "@/lib/api";
-import type { Message } from "@/types";
+import { getMemories, getDueMemories, updateMemory, deleteMemory, setPinned, getMemoryCount } from "@/lib/api";
+import type { Memory, Message } from "@/types";
 import Icon from "@/components/ui/Icon";
+
+const ALL_TAGS = ["idea", "task", "person", "place", "work", "personal", "date", "misc"] as const;
+type Tag = typeof ALL_TAGS[number];
 
 function relativeDate(date: Date): string {
   const now = new Date();
@@ -18,6 +21,17 @@ function relativeDate(date: Date): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function formatDue(dueIso: string): { label: string; overdue: boolean } {
+  const due = new Date(dueIso + (dueIso.endsWith("Z") ? "" : "Z"));
+  const now = new Date();
+  const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+
+  if (diffDays < -1) return { label: `${-diffDays}d overdue`, overdue: true };
+  if (diffDays <= 0) return { label: "due today", overdue: false };
+  if (diffDays === 1) return { label: "due tomorrow", overdue: false };
+  return { label: `due in ${diffDays}d`, overdue: false };
 }
 
 function isInTimeWindow(date: Date, window: string): boolean {
@@ -63,6 +77,7 @@ function MemoryRow({ memory, onUpdate, onDelete, onPinToggle }: MemoryRowProps) 
   const [editValue, setEditValue] = useState(memory.content);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isPinned = memory.metadata?.pinned ?? false;
+  const tags = memory.metadata?.tags ?? [];
 
   const handleSave = () => {
     const trimmed = editValue.trim();
@@ -100,9 +115,19 @@ function MemoryRow({ memory, onUpdate, onDelete, onPinToggle }: MemoryRowProps) 
             {memory.content}
           </p>
         )}
-        <span className="font-metadata text-metadata text-outline mt-1 block">
-          {relativeDate(memory.date)}
-        </span>
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          <span className="font-metadata text-metadata text-outline">
+            {relativeDate(memory.date)}
+          </span>
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="px-1.5 py-0.5 rounded-md font-metadata text-metadata bg-primary-fixed/20 text-primary"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="flex items-center gap-1">
@@ -132,10 +157,60 @@ function MemoryRow({ memory, onUpdate, onDelete, onPinToggle }: MemoryRowProps) 
           <div className="flex items-center gap-1">
             <span className="font-metadata text-metadata text-error mr-1">Delete?</span>
             <button
-              onClick={() => {
-                setConfirmDelete(false);
-                onDelete(memory.id);
-              }}
+              onClick={() => { setConfirmDelete(false); onDelete(memory.id); }}
+              className="px-2 py-1 rounded-md bg-error text-on-error font-label-md text-label-md cursor-pointer"
+            >
+              Yes
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="px-2 py-1 rounded-md bg-surface-container text-on-surface font-label-md text-label-md cursor-pointer"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="p-2 rounded-lg text-outline hover:text-error hover:bg-error/10 transition-colors cursor-pointer"
+            aria-label="Delete memory"
+            title="Delete"
+          >
+            <Icon name="delete" size={18} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface DueRowProps {
+  memory: Memory;
+  onDelete: (id: string) => void;
+}
+
+function DueRow({ memory, onDelete }: DueRowProps) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { label, overdue } = formatDue(memory.metadata?.due ?? "");
+
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container transition-colors">
+      <div className="flex-1 min-w-0">
+        <p className="font-body-md text-body-md text-on-surface break-words line-clamp-2">
+          {memory.content}
+        </p>
+        <span
+          className={`font-metadata text-metadata mt-1 block ${overdue ? "text-error" : "text-secondary"}`}
+        >
+          {label}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {confirmDelete ? (
+          <div className="flex items-center gap-1">
+            <span className="font-metadata text-metadata text-error mr-1">Delete?</span>
+            <button
+              onClick={() => { setConfirmDelete(false); onDelete(memory.id); }}
               className="px-2 py-1 rounded-md bg-error text-on-error font-label-md text-label-md cursor-pointer"
             >
               Yes
@@ -165,16 +240,19 @@ function MemoryRow({ memory, onUpdate, onDelete, onPinToggle }: MemoryRowProps) 
 export default function LibraryPage() {
   const router = useRouter();
   const [memories, setMemories] = useState<Message[] | null>(null);
+  const [dueMemories, setDueMemories] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [timeWindow, setTimeWindow] = useState("all");
+  const [selectedTag, setSelectedTag] = useState<Tag | null>(null);
   const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    Promise.all([getMemories(), getMemoryCount()])
-      .then(([mems, count]) => {
+    Promise.all([getMemories(), getMemoryCount(), getDueMemories()])
+      .then(([mems, count, due]) => {
         setMemories(mems);
         setTotal(count);
+        setDueMemories(due);
         setLoading(false);
       })
       .catch(() => {
@@ -182,6 +260,30 @@ export default function LibraryPage() {
         setLoading(false);
       });
   }, []);
+
+  const tagCounts = useMemo(() => {
+    if (!memories) return {} as Record<string, number>;
+    const counts: Record<string, number> = {};
+    for (const m of memories) {
+      for (const t of m.metadata?.tags ?? []) {
+        counts[t] = (counts[t] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [memories]);
+
+  const addedLast30d = useMemo(() => {
+    if (!memories) return 0;
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return memories.filter((m) => m.date.getTime() >= cutoff).length;
+  }, [memories]);
+
+  const topTags = useMemo(() => {
+    return Object.entries(tagCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([tag]) => tag);
+  }, [tagCounts]);
 
   const filtered = useMemo(() => {
     if (!memories) return [];
@@ -196,7 +298,10 @@ export default function LibraryPage() {
       result = result.filter((m) => isInTimeWindow(m.date, timeWindow));
     }
 
-    // Sort: pinned first, then newest
+    if (selectedTag) {
+      result = result.filter((m) => m.metadata?.tags?.includes(selectedTag));
+    }
+
     result.sort((a, b) => {
       const aPinned = a.metadata?.pinned ? 1 : 0;
       const bPinned = b.metadata?.pinned ? 1 : 0;
@@ -205,35 +310,24 @@ export default function LibraryPage() {
     });
 
     return result;
-  }, [memories, search, timeWindow]);
+  }, [memories, search, timeWindow, selectedTag]);
 
   const handleUpdate = useCallback(async (id: string, content: string) => {
     await updateMemory(id, content);
-    setMemories((prev) =>
-      prev
-        ? prev.map((m) => (m.id === id ? { ...m, content } : m))
-        : prev
-    );
+    setMemories((prev) => prev ? prev.map((m) => (m.id === id ? { ...m, content } : m)) : prev);
   }, []);
 
   const handleDelete = useCallback(async (id: string) => {
     await deleteMemory(id);
-    setMemories((prev) =>
-      prev ? prev.filter((m) => m.id !== id) : prev
-    );
+    setMemories((prev) => prev ? prev.filter((m) => m.id !== id) : prev);
+    setDueMemories((prev) => prev.filter((m) => m.id !== id));
     setTotal((t) => Math.max(0, t - 1));
   }, []);
 
   const handlePinToggle = useCallback(async (id: string, pinned: boolean) => {
     await setPinned(id, pinned);
     setMemories((prev) =>
-      prev
-        ? prev.map((m) =>
-            m.id === id
-              ? { ...m, metadata: { ...m.metadata, pinned } }
-              : m
-          )
-        : prev
+      prev ? prev.map((m) => m.id === id ? { ...m, metadata: { ...m.metadata, pinned } } : m) : prev
     );
   }, []);
 
@@ -258,14 +352,39 @@ export default function LibraryPage() {
 
       {/* Main content */}
       <main className="chat-container flex-1 px-6 pt-24 pb-10">
-        {/* Search + filters */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+
+        {/* Due & Upcoming section */}
+        {!loading && dueMemories.length > 0 && (
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="font-label-md text-label-md text-on-surface">Due & Upcoming</h2>
+              <span className="px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-metadata text-metadata">
+                {dueMemories.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {dueMemories.map((m) => (
+                <DueRow key={m.id} memory={m} onDelete={handleDelete} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Insights bar */}
+        {!loading && memories && memories.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mb-6 font-metadata text-metadata text-outline">
+            <span>{total} memories</span>
+            <span>{addedLast30d} added this month</span>
+            {topTags.length > 0 && (
+              <span>top tags: {topTags.join(", ")}</span>
+            )}
+          </div>
+        )}
+
+        {/* Search + time filter */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-3">
           <div className="relative flex-1">
-            <Icon
-              name="search"
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-outline"
-            />
+            <Icon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-outline" />
             <input
               type="text"
               value={search}
@@ -288,14 +407,52 @@ export default function LibraryPage() {
           </select>
         </div>
 
+        {/* Tag filter chips */}
+        <div className="flex flex-wrap gap-2 mb-5">
+          <button
+            onClick={() => setSelectedTag(null)}
+            className={`px-3 py-1 rounded-full font-label-md text-label-md transition-colors cursor-pointer ${
+              selectedTag === null
+                ? "bg-primary text-on-primary"
+                : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+            }`}
+          >
+            All
+          </button>
+          {ALL_TAGS.map((tag) => {
+            const count = tagCounts[tag] ?? 0;
+            const active = selectedTag === tag;
+            return (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(active ? null : tag)}
+                className={`px-3 py-1 rounded-full font-label-md text-label-md transition-colors cursor-pointer ${
+                  active
+                    ? "bg-primary text-on-primary"
+                    : count > 0
+                    ? "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+                    : "bg-surface-container text-outline opacity-50 cursor-default"
+                }`}
+                disabled={count === 0}
+              >
+                {tag}
+                {count > 0 && (
+                  <span className="ml-1.5 opacity-70">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Results count */}
         {!loading && (
           <p className="font-metadata text-metadata text-outline mb-4">
             {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+            {selectedTag && <span className="ml-1">tagged <em>{selectedTag}</em></span>}
           </p>
         )}
 
-        {/* List */}
+        {/* Memory list */}
         <div className="flex flex-col gap-3">
           {loading &&
             Array.from({ length: 5 }).map((_, i) => (
@@ -305,7 +462,7 @@ export default function LibraryPage() {
           {!loading && filtered.length === 0 && (
             <div className="text-center py-12">
               <p className="font-body-md text-body-md text-outline">
-                {search.trim() || timeWindow !== "all"
+                {search.trim() || timeWindow !== "all" || selectedTag
                   ? "No memories match your filters."
                   : "Nothing saved yet — start chatting to build your library."}
               </p>

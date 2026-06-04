@@ -10,10 +10,18 @@ def get_client(cfg: Config) -> Client:
     return create_client(cfg.supabase_url, cfg.supabase_key)
 
 
-def add_memory(client: Client, content: str, embedding: list[float] | None, user_id: str) -> dict:
+def add_memory(
+    client: Client,
+    content: str,
+    embedding: list[float] | None,
+    user_id: str,
+    metadata: dict | None = None,
+) -> dict:
     row: dict = {"content": content, "user_id": user_id}
     if embedding is not None:
         row["embedding"] = embedding
+    if metadata:
+        row["metadata"] = metadata
     result = client.table("memories").insert(row).execute()
     return result.data[0]
 
@@ -117,6 +125,53 @@ def search_memories_text(
         .eq("user_id", user_id)
         .ilike("content", f"%{query}%")
         .order("created_at", desc=True)
+        .execute()
+    )
+    return [Memory(**row) for row in result.data]
+
+
+def content_exists(client: Client, user_id: str, content: str) -> bool:
+    result = (
+        client.table("memories")
+        .select("id")
+        .eq("user_id", user_id)
+        .ilike("content", content)
+        .limit(1)
+        .execute()
+    )
+    return len(result.data) > 0
+
+
+def update_metadata(client: Client, mem_id: str, user_id: str, updates: dict) -> dict:
+    result = (
+        client.table("memories")
+        .select("metadata")
+        .eq("id", mem_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        return {}
+    current = result.data[0].get("metadata") or {}
+    merged = {**current, **updates}
+    result = (
+        client.table("memories")
+        .update({"metadata": merged})
+        .eq("id", mem_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return result.data[0] if result.data else {}
+
+
+def list_due(client: Client, user_id: str, before: datetime) -> list[Memory]:
+    result = (
+        client.table("memories")
+        .select("id, content, created_at, user_id, metadata")
+        .eq("user_id", user_id)
+        .filter("metadata->>due", "not.is", "null")
+        .filter("metadata->>due", "lte", before.isoformat())
+        .order("metadata->>due", desc=False)
         .execute()
     )
     return [Memory(**row) for row in result.data]
