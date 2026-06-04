@@ -136,7 +136,7 @@ export default function AuthForm() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="John Doe"
-                className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-10 pr-4 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                className="w-full bg-surface-container-lowest text-on-surface border border-outline-variant rounded-lg pl-10 pr-4 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
               />
             </div>
           </div>
@@ -154,7 +154,7 @@ export default function AuthForm() {
                 onChange={(e) => { setEmail(e.target.value); setEmailError(""); }}
                 required
                 placeholder="name@domain.com"
-                className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-10 pr-4 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                className="w-full bg-surface-container-lowest text-on-surface border border-outline-variant rounded-lg pl-10 pr-4 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
               />
             </div>
             {emailError && <p className="text-xs text-error">{emailError}</p>}
@@ -182,7 +182,7 @@ export default function AuthForm() {
                 required
                 minLength={6}
                 placeholder="••••••••"
-                className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-10 pr-12 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                className="w-full bg-surface-container-lowest text-on-surface border border-outline-variant rounded-lg pl-10 pr-12 py-3 font-body-md text-body-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
               />
               <button
                 type="button"
