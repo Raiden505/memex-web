@@ -31,6 +31,25 @@ _WEEKDAY_MAP = {
 }
 _UTC = ZoneInfo("UTC")
 
+# Phase 24: a query is about *due dates* (not when something was saved) when it
+# mentions any of these. This is what separates "what's due today" (filter on
+# due_at) from "what did I save today" (filter on created_at).
+_DUE_INTENT_RE = re.compile(
+    r"\b(due|deadlines?|overdue|to-?do|to do|tasks?|reminders?|upcoming|"
+    r"owe|need(?:s)?\s+to\s+do|have\s+to\s+do|supposed\s+to|schedule[ds]?|"
+    r"plan(?:ned)?|calendar|events?|appointments?|meetings?)\b",
+    re.IGNORECASE,
+)
+
+# When a query contains strong creation-time words it is asking about memories
+# that were *saved*, not about what is *due* — even if planning vocab is present.
+# e.g. "what tasks did I save this week?" → saved, not due.
+_CREATION_INTENT_RE = re.compile(
+    r"\b(saved?|stored?|told|tell(?:s|ing)?|noted?|recorded?|added|"
+    r"wr(?:ote|ite|itten|iting)|mentioned)\b",
+    re.IGNORECASE,
+)
+
 
 def _resolve_tz(tz: str | None) -> ZoneInfo:
     if tz is not None:
@@ -55,14 +74,16 @@ def extract_range(text: str, tz: str | None = None, now: datetime | None = None)
 
     lower = text.strip().lower()
 
-    if lower == "today":
+    # Match these as words anywhere in the question ("what did I tell you today?"),
+    # not just as the whole message.
+    if re.search(r"\btoday\b", lower):
         start = local_midnight
         end = now
         start_utc = start.astimezone(_UTC).replace(tzinfo=None)
         end_utc = end.astimezone(_UTC).replace(tzinfo=None)
         return (start_utc, end_utc, "today")
 
-    if lower == "yesterday":
+    if re.search(r"\byesterday\b", lower):
         yesterday = local_midnight - timedelta(days=1)
         start = yesterday
         end = local_midnight
@@ -70,7 +91,7 @@ def extract_range(text: str, tz: str | None = None, now: datetime | None = None)
         end_utc = end.astimezone(_UTC).replace(tzinfo=None)
         return (start_utc, end_utc, "yesterday")
 
-    if lower == "this week":
+    if re.search(r"\bthis\s+week\b", lower):
         weekday = local_midnight.weekday()
         start = local_midnight - timedelta(days=weekday)
         end = now
@@ -110,6 +131,58 @@ def extract_range(text: str, tz: str | None = None, now: datetime | None = None)
             return (start_utc, end_utc, f"on {w}")
 
     return None
+
+
+def extract_due_range(
+    text: str, tz: str | None = None, now: datetime | None = None
+) -> tuple[datetime, datetime, str] | None:
+    """For due-date questions, return the [start, end) window (naive UTC) to filter
+    `due_at` on, plus a human label. Returns None if the text isn't about due dates.
+
+    Unlike `extract_range` (which is about when memories were *created*), this is
+    about when things are *due* and is the path for "what's due today / this week".
+    """
+    if not _DUE_INTENT_RE.search(text):
+        return None
+    # "what tasks did I save this week?" has planning vocab but is asking about
+    # creation time, not due time.  Creation-time words override the due intent.
+    if _CREATION_INTENT_RE.search(text):
+        return None
+
+    if now is None:
+        tz_obj = _resolve_tz(tz)
+        now = datetime.now(tz_obj)
+    elif now.tzinfo is not None:
+        tz_obj = now.tzinfo
+    else:
+        tz_obj = _resolve_tz(tz)
+        now = now.replace(tzinfo=tz_obj)
+
+    local_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    far_past = local_midnight - timedelta(days=3650)
+    lower = text.lower()
+
+    if re.search(r"\boverdue\b", lower):
+        start, end, label = far_past, now, "overdue"
+    elif re.search(r"\btomorrow\b", lower):
+        day = local_midnight + timedelta(days=1)
+        start, end, label = day, day + timedelta(days=1), "tomorrow"
+    elif re.search(r"\btoday\b", lower):
+        # The whole of today, including items due earlier in the day.
+        start, end, label = local_midnight, local_midnight + timedelta(days=1), "today"
+    elif re.search(r"\bnext\s+week\b", lower):
+        week_start = local_midnight - timedelta(days=local_midnight.weekday()) + timedelta(days=7)
+        start, end, label = week_start, week_start + timedelta(days=7), "next week"
+    elif re.search(r"\bthis\s+week\b", lower):
+        week_start = local_midnight - timedelta(days=local_midnight.weekday())
+        start, end, label = week_start, week_start + timedelta(days=7), "this week"
+    else:
+        # Generic "what's due / what do I have to do" → overdue + the next 7 days.
+        start, end, label = far_past, local_midnight + timedelta(days=8), "soon"
+
+    start_utc = start.astimezone(_UTC).replace(tzinfo=None)
+    end_utc = end.astimezone(_UTC).replace(tzinfo=None)
+    return (start_utc, end_utc, label)
 
 
 def _apply_time(dt: datetime, lower: str) -> datetime:

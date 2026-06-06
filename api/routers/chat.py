@@ -23,6 +23,10 @@ _FORGET_VERB_RE = _re.compile(
     r"|the\s+memory\s+(of\s+|about\s+)?)?",
     _re.IGNORECASE,
 )
+# A delete only fans out to many memories when the user explicitly asks for it.
+# Without one of these words we delete a single best-matching memory (Phase 25).
+_FORGET_BULK_RE = _re.compile(r"\b(everything|all|every|each)\b", _re.IGNORECASE)
+_FORGET_FLOOR = 0.6
 
 
 def _sse(payload: dict) -> str:
@@ -33,6 +37,9 @@ class ChatRequest(BaseModel):
     message: str
     tz: str | None = None
     confirm_forget: list[str] | None = None
+    # "recall" forces a grounded semantic lookup of a specific memory, skipping
+    # intent routing and temporal/due parsing (Phase 23 memory deep-dive).
+    mode: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -43,13 +50,20 @@ class ChatResponse(BaseModel):
     forget_candidates: list[dict] | None = None
 
 
-def _handle_query(message: str, user_id: str, db: Client, tz: str | None) -> str:
+def _handle_query(message: str, user_id: str, db: Client, tz: str | None, semantic_only: bool = False) -> str:
     tz_str = tz or "UTC"
-    rng = temporal.extract_range(message, tz=tz_str)
-    if rng:
-        start, end, label = rng
-        mems = store.list_memories_in_range(db, user_id, start, end)
-        return llm.summarize_window(mems, label, _cfg)
+    if not semantic_only:
+        # Due-date questions ("what's due today") filter on due_at, not created_at.
+        due_rng = temporal.extract_due_range(message, tz=tz_str)
+        if due_rng:
+            start, end, label = due_rng
+            mems = store.list_due_in_range(db, user_id, start, end)
+            return llm.summarize_due_window(mems, label, _cfg)
+        rng = temporal.extract_range(message, tz=tz_str)
+        if rng:
+            start, end, label = rng
+            mems = store.list_memories_in_range(db, user_id, start, end)
+            return llm.summarize_window(mems, label, _cfg)
     query_embedding = embeddings.embed(message, _cfg, task_type="RETRIEVAL_QUERY")
     results = store.search_memories(db, query_embedding, user_id, _cfg.top_k)
     return llm.synthesize_answer(message, results, _cfg)
@@ -62,18 +76,23 @@ def _resolve_forget_candidates(message: str, user_id: str, db: Client, tz: str |
         mems = store.list_memories(db, user_id)
         return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in mems]
 
-    rng = temporal.extract_range(message, tz=tz_str)
-    if rng:
-        start, end, _ = rng
-        mems = store.list_memories_in_range(db, user_id, start, end)
-        return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in mems]
+    # Only fan out to a whole date range when the user explicitly asks to delete
+    # "everything/all" from it — otherwise a stray date word in a single-memory
+    # delete ("forget the dentist appointment on Monday") shouldn't nuke the day.
+    if _FORGET_BULK_RE.search(message):
+        rng = temporal.extract_range(message, tz=tz_str)
+        if rng:
+            start, end, _ = rng
+            mems = store.list_memories_in_range(db, user_id, start, end)
+            return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in mems]
 
+    # Default: the single best-matching memory.
     target = _FORGET_VERB_RE.sub("", message).strip() or message
     query_embedding = embeddings.embed(target, _cfg, task_type="RETRIEVAL_QUERY")
     results = store.search_memories(db, query_embedding, user_id, _cfg.top_k)
-    for r in results:
-        if r.similarity >= 0.6:
-            return [{"id": r.id, "content": r.content, "created_at": r.created_at}]
+    if results and results[0].similarity >= _FORGET_FLOOR:
+        r = results[0]
+        return [{"id": r.id, "content": r.content, "created_at": r.created_at}]
     return []
 
 
@@ -123,15 +142,19 @@ async def chat(
             )
         return ChatResponse(intent="forget", reply=reply, source="none")
 
-    # Normal routing
-    try:
-        intent = router.route(body.message, _cfg)
-    except Exception:
-        intent = "store"
+    # Memory deep-dive: skip routing, go straight to a grounded semantic lookup.
+    semantic_only = body.mode == "recall"
+    if semantic_only:
+        intent = "query"
+    else:
+        try:
+            intent = router.route(body.message, _cfg)
+        except Exception:
+            intent = "store"
 
     if stream:
         return StreamingResponse(
-            _stream_chat(body.message, intent, user_id, db, body.tz, background_tasks),
+            _stream_chat(body.message, intent, user_id, db, body.tz, background_tasks, semantic_only),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
@@ -162,8 +185,9 @@ async def chat(
             )
 
         # query
-        answer = _handle_query(body.message, user_id, db, body.tz)
-        source = "none" if answer == llm._NO_MEMORIES or answer.startswith("Nothing saved") else "memory"
+        answer = _handle_query(body.message, user_id, db, body.tz, semantic_only)
+        empty = answer == llm._NO_MEMORIES or answer.startswith(("Nothing saved", "Nothing due"))
+        source = "none" if empty else "memory"
         return ChatResponse(intent="query", reply=answer, source=source)
 
     except Exception as exc:
@@ -171,7 +195,8 @@ async def chat(
 
 
 async def _stream_chat(
-    message: str, intent: str, user_id: str, db: Client, tz: str | None, bg: BackgroundTasks
+    message: str, intent: str, user_id: str, db: Client, tz: str | None, bg: BackgroundTasks,
+    semantic_only: bool = False,
 ):
     try:
         if intent == "store":
@@ -201,8 +226,15 @@ async def _stream_chat(
 
         else:
             tz_str = tz or "UTC"
-            rng = temporal.extract_range(message, tz=tz_str)
-            if rng:
+            due_rng = None if semantic_only else temporal.extract_due_range(message, tz=tz_str)
+            rng = None if semantic_only else temporal.extract_range(message, tz=tz_str)
+            if due_rng:
+                start, end, label = due_rng
+                mems = store.list_due_in_range(db, user_id, start, end)
+                async for token in llm.summarize_due_window_stream_async(mems, label, _cfg):
+                    yield _sse({"t": token})
+                    await asyncio.sleep(0)
+            elif rng:
                 start, end, label = rng
                 mems = store.list_memories_in_range(db, user_id, start, end)
                 async for token in llm.summarize_window_stream_async(mems, label, _cfg):

@@ -35,7 +35,7 @@ async function fetchApi<T>(
 export async function createMemory(content: string): Promise<{ id: string; created_at: string }> {
   return fetchApi("/memories", {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
   });
 }
 
@@ -103,7 +103,7 @@ export async function setPinned(id: string, pinned: boolean): Promise<{ id: stri
 
 export async function postChat(
   message: string,
-  opts: { confirmForget?: string[] } = {}
+  opts: { confirmForget?: string[]; mode?: string } = {}
 ): Promise<{ intent: string; reply: string; id: string | null; source: string | null; forget_candidates?: ForgetCandidate[] }> {
   return fetchApi("/chat", {
     method: "POST",
@@ -111,6 +111,7 @@ export async function postChat(
       message,
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       ...(opts.confirmForget !== undefined ? { confirm_forget: opts.confirmForget } : {}),
+      ...(opts.mode ? { mode: opts.mode } : {}),
     }),
   });
 }
@@ -118,7 +119,8 @@ export async function postChat(
 export async function* postChatStream(
   message: string,
   retries = 1,
-  onForgetCandidates?: (candidates: ForgetCandidate[]) => void
+  onForgetCandidates?: (candidates: ForgetCandidate[]) => void,
+  opts: { mode?: string } = {}
 ): AsyncGenerator<string, void, unknown> {
   const token = await getToken();
 
@@ -133,6 +135,7 @@ export async function* postChatStream(
         body: JSON.stringify({
           message,
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ...(opts.mode ? { mode: opts.mode } : {}),
         }),
       });
 

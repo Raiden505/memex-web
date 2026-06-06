@@ -24,6 +24,7 @@ def _apply_tags_bg(mem_id: str, content: str, user_id: str, db: Client) -> None:
 
 class StoreRequest(BaseModel):
     content: str
+    tz: str | None = None
 
 
 class MemoryOut(BaseModel):
@@ -59,7 +60,7 @@ async def create_memory(
 ) -> dict:
     try:
         embedding = embeddings.embed(body.content, _cfg, task_type="RETRIEVAL_DOCUMENT")
-        due = temporal.extract_due(body.content)
+        due = temporal.extract_due(body.content, tz=body.tz)
         initial_meta = {"due": due.isoformat()} if due else None
         row = store.add_memory(db, body.content, embedding, user_id, metadata=initial_meta)
     except Exception as exc:

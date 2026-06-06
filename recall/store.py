@@ -22,6 +22,9 @@ def add_memory(
         row["embedding"] = embedding
     if metadata:
         row["metadata"] = metadata
+        # Mirror the due date into the typed, indexed column (Phase 24).
+        if metadata.get("due"):
+            row["due_at"] = metadata["due"]
     result = client.table("memories").insert(row).execute()
     return result.data[0]
 
@@ -106,14 +109,8 @@ def update_memory(
 def set_pinned(
     client: Client, mem_id: str, user_id: str, pinned: bool
 ) -> dict:
-    result = (
-        client.table("memories")
-        .update({"metadata": {"pinned": pinned}})
-        .eq("id", mem_id)
-        .eq("user_id", user_id)
-        .execute()
-    )
-    return result.data[0] if result.data else {}
+    # Merge so pinning doesn't wipe tags/due already in metadata.
+    return update_metadata(client, mem_id, user_id, {"pinned": pinned})
 
 
 def search_memories_text(
@@ -154,9 +151,13 @@ def update_metadata(client: Client, mem_id: str, user_id: str, updates: dict) ->
         return {}
     current = result.data[0].get("metadata") or {}
     merged = {**current, **updates}
+    payload: dict = {"metadata": merged}
+    # Keep the typed due_at column in sync whenever the due date changes (Phase 24).
+    if "due" in updates:
+        payload["due_at"] = updates["due"]
     result = (
         client.table("memories")
-        .update({"metadata": merged})
+        .update(payload)
         .eq("id", mem_id)
         .eq("user_id", user_id)
         .execute()
@@ -169,9 +170,26 @@ def list_due(client: Client, user_id: str, before: datetime) -> list[Memory]:
         client.table("memories")
         .select("id, content, created_at, user_id, metadata")
         .eq("user_id", user_id)
-        .filter("metadata->>due", "not.is", "null")
-        .filter("metadata->>due", "lte", before.isoformat())
-        .order("metadata->>due", desc=False)
+        .filter("due_at", "not.is", "null")
+        .filter("due_at", "lte", before.isoformat())
+        .order("due_at", desc=False)
+        .execute()
+    )
+    return [Memory(**row) for row in result.data]
+
+
+def list_due_in_range(
+    client: Client, user_id: str, start: datetime, end: datetime
+) -> list[Memory]:
+    """Memories whose due date falls in [start, end), soonest first (Phase 24)."""
+    result = (
+        client.table("memories")
+        .select("id, content, created_at, user_id, metadata")
+        .eq("user_id", user_id)
+        .filter("due_at", "not.is", "null")
+        .gte("due_at", start.isoformat())
+        .lt("due_at", end.isoformat())
+        .order("due_at", desc=False)
         .execute()
     )
     return [Memory(**row) for row in result.data]

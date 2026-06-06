@@ -185,12 +185,16 @@ Each phase ends in a manual Definition of Done; do not start one until the previ
 | 6 | FastAPI backend | ✅ | Authenticated `/memories` CRUD + `/chat` over HTTP with a real Supabase JWT; CLI unchanged. |
 | 7 | Next.js web app | ✅ | Sign in, store from the web, ask and get a correct answer incl. CLI-stored memories; works desktop + mobile. |
 | 8 | Streaming + hardening | ✅ | Responses stream in; network drop / rate limit shows an inline error, not a crash. |
-| 9 | Conversational range (GENERAL) | ▶ next | Greetings/general questions get a short reply and are **not** saved; personal-recall misses still say "nothing saved". |
-| 10 | Temporal recall | ⬜ | "what did I tell you today/this week/yesterday" returns the right window in the user's local day. |
-| 11 | Web UX refinements | ⬜ | Cursor returns to input; type-while-loading (no send); fast login → chat. |
+| 9 | Conversational range (GENERAL) | ✅ | Greetings/general questions get a short reply and are **not** saved; personal-recall misses still say "nothing saved". |
+| 10 | Temporal recall | ✅ | "what did I tell you today/this week/yesterday" returns the right window in the user's local day. |
+| 11 | Web UX refinements | ✅ | Cursor returns to input; type-while-loading (no send); fast login → chat. |
+| 12–22 | Wave 2 (hardening, library, organisation, capture) | ✅ | See `PRD-v3.md` Part II. |
+| 23 | Accurate recall | ✅ | Clicking a memory gives a grounded answer about *that* memory; weak matches no longer pollute answers. |
+| 24 | Due-date recall | ✅ | "what's due today/this week/tomorrow" reads *due dates* (not save dates); typed `due_at` column. |
+| 25 | Forget precision & dialog fix | ✅ | A plain delete targets the single best-matching memory; the confirm card sits above the input. |
 
 Full per-phase Definitions of Done: phases 0–4 in `TDD.md`, 5–8 in `TDD-v2.md`, 9–11 in
-`TDD-v3.md`.
+`TDD-v3.md`, 12–22 in `PRD-v3.md`/`TDD-v3.md` Part II, 23–25 in `§13` below and `TDD.md §18`.
 
 ---
 
@@ -228,3 +232,45 @@ Full per-phase Definitions of Done: phases 0–4 in `TDD.md`, 5–8 in `TDD-v2.m
 - Topical + temporal combined queries as a first-class feature.
 - Native mobile app using the same FastAPI backend.
 - A privacy mode that keeps stored text out of third-party training data.
+
+---
+
+## 13. Wave 3 — Accuracy & dates (phases 23–25)
+
+Driven by real usage: the app worked but sometimes answered inaccurately, mishandled
+due-date questions, over-deleted, and the delete dialog was mispositioned.
+
+### Phase 23 — Accurate recall
+- **R23.1 — Memory deep-dive.** Clicking a saved memory (recent or due) asks Memex about
+  *that specific memory*. It must return a grounded answer about it, not re-run a fuzzy
+  search over the whole store and risk answering from the wrong note, and must never be
+  mis-routed into re-saving the text. *DoD:* clicking a memory yields a relevant, grounded
+  reply that clearly concerns the clicked item.
+- **R23.2 — Less noise in answers.** Before synthesising a personal answer, drop retrieved
+  memories that are only weakly related, so an off-topic note can't derail the reply. The
+  no-hallucination rule still holds: if nothing relevant remains, say "nothing saved".
+  *DoD:* a question whose answer lives in one memory isn't muddied by unrelated ones.
+
+### Phase 24 — Due-date recall
+- **R24.1 — Due means due.** "What's due today / this week / tomorrow / what do I have to
+  do / anything overdue" answers from each memory's **due date**, not from when it was
+  saved. Saving "submit the report tomorrow" today and asking "what's due today" tomorrow
+  returns it. *DoD:* due-date questions list the right items for the window, in the user's
+  local day; nothing due → "Nothing due {window}."
+- **R24.2 — Typed due column.** Due dates live in a dedicated, indexed `due_at` column
+  (kept in sync with the existing `metadata.due`), so date-range queries are robust and
+  fast. *DoD:* the migration backfills existing rows; due queries use the column.
+
+> **Also fixed in passing (R24.3):** temporal recall (`extract_range`) now matches
+> "today / yesterday / this week" as words inside a sentence, so the PRD's own example
+> "what did I tell you today?" works — previously only the bare word "today" did.
+
+### Phase 25 — Forget precision & dialog fix
+- **R25.1 — Delete one by default.** A natural-language delete targets the **single
+  highest-scoring** memory unless the user explicitly says "everything/all". A stray date
+  word ("…on Monday") must not turn a one-item delete into a whole-day purge. *DoD:*
+  "forget the dentist note" proposes exactly one memory; "forget everything from yesterday"
+  still proposes the whole day.
+- **R25.2 — Confirm card placement.** The delete-confirmation card floats clearly above
+  the chat input, never under it. *DoD:* on desktop and mobile the card is fully visible
+  and tappable.

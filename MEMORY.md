@@ -7,10 +7,11 @@ Read this before touching any code. Write to it after every change.
 
 ## Current State
 
-- **Phase:** 22 complete (Capture & reach). **All planned phases complete.**
-- **Last worked on:** 2026-06-04
-- **Last agent action:** Phase 20 — `extract_due` in `temporal.py`; `tag_memory` in `llm.py`; `add_memory` extended with optional `metadata`; `update_metadata` + `list_due` in `store.py`; `GET /memories/due` (next 7 days + overdue); chat store branches compute due + enqueue tag background task (`BackgroundTasks`); CLI `_do_store` computes due + tags inline; frontend `MemoryMetadata` shared type; `getDueMemories()` in `api.ts`; Library page gets Due & Upcoming section, tag filter chips, and tag pills on each memory row. Also fixed dark mode: auth form inputs gained `text-on-surface`.
-- **Prior agent action:** Phase 15 — prompt system centralised in `recall/prompts.py`, `save_ack()` rotation.
+- **Phase:** 23–25 complete (Wave 3: accuracy & dates). **All planned phases complete.**
+- **Last worked on:** 2026-06-06
+- **Last agent action:** Wave 3 — (23) memory deep-dive via `mode:"recall"` (semantic-only, skips routing) + relevance floor `_filter_relevant` in `llm.synthesize_*` + rewritten `_SYSTEM_PROMPT`; (24) typed `due_at` column + index + backfill in `schema.sql`, `store.add_memory`/`update_metadata` keep `due_at`≡`metadata.due`, `list_due` uses column, new `list_due_in_range`, `temporal.extract_due_range`, `llm.summarize_due_window`, query path checks due-range before created_at-range, `extract_range` now word-boundary matches "today/yesterday/this week"; (25) forget defaults to single top match (bulk only on "everything/all"), `ForgetConfirm` overlay raised to `bottom-32 sm:bottom-36 z-[60]`.
+- **⚠️ ACTION REQUIRED:** run the updated `supabase/schema.sql` (adds `due_at` column) **before** the new code is deployed — `add_memory` now writes `due_at` and will error if the column is missing.
+- **Prior agent action:** Phase 22 — quick-capture, voice input, command palette, PWA, shared memory.
 
 ---
 
@@ -41,6 +42,9 @@ Read this before touching any code. Write to it after every change.
 | 20    | Organisation & reminders    | complete       | auto-tags (`metadata.tags`, closed label set), `temporal.extract_due` → `metadata.due`, `GET /memories/due`. Best-effort, never blocks save. |
 | 21    | Data ownership & insights   | complete       | export/import (`/memories/export`, `/import` w/ de-dup), `/memories/stats`, on-demand digest. |
 | 22    | Capture & reach             | complete       | quick-capture, Web Speech voice input, `Cmd/Ctrl+K` command palette, installable PWA, optional shared single memory. |
+| 23    | Accurate recall             | complete       | memory deep-dive (`mode:"recall"`, semantic-only); relevance floor `_filter_relevant`; rewritten synthesis prompt. |
+| 24    | Due-date recall             | complete       | typed `due_at` column + index + backfill; `extract_due_range`; `list_due_in_range`; `summarize_due_window`; due-range checked before created_at-range; `extract_range` word-boundary match. |
+| 25    | Forget precision & dialog   | complete       | natural delete → single top match (bulk only on "everything/all"); `ForgetConfirm` overlay raised above input bar. |
 
 ---
 
@@ -60,6 +64,11 @@ Fill these in once confirmed against official docs before writing integration co
 
 | Date       | Decision | Reason |
 |------------|----------|--------|
+| 2026-06-06 | Due dates get a typed `due_at timestamptz` column (synced with `metadata.due`), not metadata-only | User chose it; date-range filters on a typed/indexed column are robust vs ISO-string compare in jsonb. Kept `metadata.due` too so display/export and existing code paths are untouched. **Requires running the migration before deploy** (writes set `due_at`). |
+| 2026-06-06 | Memory-click "deep-dive" added a `mode:"recall"` flag that skips routing + temporal parsing and does semantic-only synthesis | The old click stuffed the whole note into a routed query string — circular, noisy, and could be mis-routed to STORE or hijacked by a `due`/`task`/date word inside the note. A dedicated mode is deterministic and accurate without a new endpoint. |
+| 2026-06-06 | Forget: temporal/all bulk only when "everything/all/every/each" present; else single top semantic match | User reported a plain delete offering 3 memories — caused by a stray date word triggering the temporal-range branch. Gating bulk to explicit quantifiers matches intent; the semantic path already returns the highest-similarity match. |
+| 2026-06-06 | `extract_due_range` checked before `extract_range` in the query path; due-intent detected by `_DUE_INTENT_RE` | "what's due today" must read due dates, not save dates. Keyword gate keeps "what did I save today" on the created_at path. Also relaxed `extract_range` from whole-string equality to word-boundary search so natural phrasing triggers temporal recall. |
+| 2026-06-06 | Synthesis: drop weak matches (`_filter_relevant`, floor 0.2 / spread 0.2) + rewrote `_SYSTEM_PROMPT` | Inaccurate answers came from passing all top-k memories regardless of similarity; an off-topic note derailed replies. Filtering tightens grounding and reinforces no-hallucination (empty after filter → "nothing saved"). |
 | 2026-06-02 | Wave 2 (phases 12–22) planned into `PRD-v3.md`/`TDD-v3.md` Part II rather than new files | User asked to "add to" the existing v3 docs; phase numbers continue 12+; the requested fixes (12–18) ship before the new product surface (19–22) |
 | 2026-06-02 | Streaming bug diagnosed: tokens with `\n` break `data: {token}\n\n` SSE framing; `api.ts` drops any line not starting with `data: `. Fix = JSON-encode each frame (`{t|done|error}`) and split client buffer on `\n\n` | Pinpointed from reading `chat.py` `_stream_chat` + `api.ts` `postChatStream`; JSON-encoding is the simplest lossless transport and avoids fiddly multi-`data:` rejoining |
 | 2026-06-02 | New state (pin/tags/due/shared) rides existing `metadata jsonb`; name rides `user_metadata`; only optional GIN index + optional shared-RLS policy are schema changes | Keeps Wave 2 migration-light; `vector(768)`/HNSW/`match_memories` untouched |
@@ -82,6 +91,7 @@ Fill these in once confirmed against official docs before writing integration co
 
 ## Open Questions / Blockers
 
+- **[ACTION for Wave 3 / Phase 24]** Run the updated `supabase/schema.sql` in the Supabase SQL editor. It adds the `due_at timestamptz` column, the `memories_user_due_idx` index, and backfills `due_at` from existing `metadata.due`. Must happen **before** deploying the new backend — `store.add_memory` now writes `due_at`. After migrating, verify: save "submit report tomorrow", then ask "what's due today/tomorrow" and confirm the due-window listing; delete a single note by description and confirm only one candidate appears.
 - **[ACTION for Phase 5 DoD]** Run updated `supabase/schema.sql` in Supabase SQL editor (RLS now enabled with owner policy). Set `SUPABASE_ANON_KEY` in `.env`. Then: `python -m recall` → sign up with an email → store some memories → `/quit` → `python -m recall` again → restored session should show previous memories. Create a second account and verify it sees none of the first account's memories.
 - **[ACTION for Phase 1 DoD]** Fill in real `SUPABASE_URL` and `SUPABASE_KEY` (service_role) in `.env`, then run `supabase/schema.sql` in the Supabase SQL editor. After that, test: `/add buy milk` → id appears; `/list` shows it; `/count` correct; `/forget <id>` removes it; quit+relaunch persists.
 - **[ACTION for Phase 2 DoD]** Add `GEMINI_API_KEY` and set `EMBED_MODEL=gemini-embedding-001` in `.env`. Add a few distinct memories with `/add`, then test `/search` with different wording — right notes should surface with sensible similarity scores.
@@ -94,6 +104,26 @@ Fill these in once confirmed against official docs before writing integration co
 ## Session Notes
 
 Short log of what each session did. Prepend new entries (newest at top).
+
+### 2026-06-06 — Wave 3 (phases 23–25): accuracy & dates
+- **Phase 23 — accurate recall.**
+  - `recall/llm.py` — added `_filter_relevant(memories)` (keep similarity ≥ max(0.2, top−0.2)); applied at the head of `synthesize_answer` and both stream variants → empty after filter returns `_NO_MEMORIES`.
+  - `recall/prompts.py` — rewrote `_SYSTEM_PROMPT` (lead with a direct answer, use only the relevant memory, never guess).
+  - `api/routers/chat.py` — `ChatRequest.mode`; `mode=="recall"` forces `intent="query"` + `semantic_only=True` threaded through `_handle_query`/`_stream_chat` (skips temporal/due parsing → pure semantic synthesis).
+  - `web/lib/api.ts` — `postChat`/`postChatStream` accept `{mode}`.
+  - `web/app/chat/page.tsx` — `handleSend` refactored into `sendText(text, opts)`; new `handleAskMemory` sends `"Tell me about: <content>"` with `{mode:"recall"}`.
+  - `web/components/chat/{EmptyState,RecentMemories}.tsx` — memory cards call `onAskMemory(content)`; dropped the old `What do I know about: …?` / `Tell me about:` query-string stuffing. `RecentMemories` prop `onSuggestion`→`onAskMemory`.
+- **Phase 24 — due-date recall.**
+  - `supabase/schema.sql` — `due_at timestamptz` column + `memories_user_due_idx` + backfill from `metadata->>'due'`.
+  - `recall/store.py` — `add_memory` mirrors `metadata.due`→`due_at`; `update_metadata` syncs `due_at` when `"due"` in updates; `list_due` filters the `due_at` column; new `list_due_in_range(start,end)`.
+  - `recall/temporal.py` — `_DUE_INTENT_RE`; new `extract_due_range` (windows: overdue/tomorrow/today/this&next week/generic "soon"); `extract_range` relaxed to word-boundary `re.search` for today/yesterday/this week.
+  - `recall/prompts.py` — `_DUE_SUMMARY_SYSTEM`. `recall/llm.py` — `summarize_due_window` + `_stream_async` + `_due_lines`.
+  - `api/routers/chat.py` + `recall/cli.py` — query path checks `extract_due_range` before `extract_range`; `source`/empty detection includes "Nothing due".
+- **Phase 25 — forget precision & dialog.**
+  - `api/routers/chat.py` `_resolve_forget_candidates` + `recall/cli.py` `_do_forget_natural` — bulk (all/temporal) only when `_FORGET_BULK_RE` matches; default = single top match (`results[0]` if sim ≥ 0.6).
+  - `web/app/chat/page.tsx` — `ForgetConfirm` overlay `bottom-24 z-10` → `bottom-32 sm:bottom-36 z-[60]` (above the z-50 input bar).
+- **Docs** — PRD.md §13 + phase-table rows 23–25; TDD.md §18 + `due_at` in the data model; this file.
+- Python compiles; `tsc --noEmit` clean for changed files (only pre-existing stale `.next` `app/demo` validator errors remain). No automated tests exist yet (manual DoD).
 
 ### 2026-06-04 — Phase 22 implemented
 - **`api/routers/memories.py`** — `POST /memories` now embeds content, extracts due date, inserts with initial metadata, and enqueues `_apply_tags_bg` background task (same pattern as chat route); added `_apply_tags_bg` helper; imports `BackgroundTasks`, `llm`, `temporal`.

@@ -20,6 +20,7 @@ _FORGET_VERB_RE = _re.compile(
     r"|the\s+memory\s+(of\s+|about\s+)?)?",
     _re.IGNORECASE,
 )
+_FORGET_BULK_RE = _re.compile(r"\b(everything|all|every|each)\b", _re.IGNORECASE)
 
 console = Console()
 
@@ -55,7 +56,18 @@ def _do_store(text: str, cfg: Config, client: Client) -> None:
 
 
 def _do_query(text: str, cfg: Config, client: Client) -> None:
-    rng = temporal.extract_range(text, now=datetime.now().astimezone())
+    now = datetime.now().astimezone()
+
+    due_rng = temporal.extract_due_range(text, now=now)
+    if due_rng:
+        start, end, label = due_rng
+        with console.status(f"[cyan]Checking what's due {label}...[/cyan]"):
+            mems = store.list_due_in_range(client, cfg.user_id, start, end)
+            answer = llm.summarize_due_window(mems, label, cfg)
+        console.print(f"[bold]bot \u203a[/bold] {answer}")
+        return
+
+    rng = temporal.extract_range(text, now=now)
     if rng:
         start, end, label = rng
         with console.status(f"[cyan]Scanning {label}...[/cyan]"):
@@ -74,18 +86,17 @@ def _do_query(text: str, cfg: Config, client: Client) -> None:
 def _do_forget_natural(text: str, cfg: Config, client: Client) -> None:
     if _FORGET_ALL_RE.search(text):
         candidates = store.list_memories(client, cfg.user_id)
+    elif _FORGET_BULK_RE.search(text) and (rng := temporal.extract_range(text, now=datetime.now().astimezone())):
+        # Bulk delete by date only when the user explicitly says "everything/all".
+        start, end, _ = rng
+        candidates = store.list_memories_in_range(client, cfg.user_id, start, end)
     else:
-        rng = temporal.extract_range(text, now=datetime.now().astimezone())
-        if rng:
-            start, end, _ = rng
-            candidates = store.list_memories_in_range(client, cfg.user_id, start, end)
-        else:
-            target = _FORGET_VERB_RE.sub("", text).strip() or text
-            with console.status("[cyan]Searching...[/cyan]"):
-                emb = embeddings.embed(target, cfg, task_type="RETRIEVAL_QUERY")
-                results = store.search_memories(client, emb, cfg.user_id, cfg.top_k)
-            top = next((r for r in results if r.similarity >= 0.6), None)
-            candidates = [top] if top else []
+        # Default: the single best-matching memory.
+        target = _FORGET_VERB_RE.sub("", text).strip() or text
+        with console.status("[cyan]Searching...[/cyan]"):
+            emb = embeddings.embed(target, cfg, task_type="RETRIEVAL_QUERY")
+            results = store.search_memories(client, emb, cfg.user_id, cfg.top_k)
+        candidates = [results[0]] if results and results[0].similarity >= 0.6 else []
 
     if not candidates:
         console.print("[dim]I don't have anything saved about that.[/dim]")

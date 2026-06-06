@@ -22,7 +22,24 @@ create index if not exists memories_embedding_idx
 create index if not exists memories_user_created_idx
   on memories (user_id, created_at desc);
 
+-- 3c. Due-date column + index (Phase 24)
+--     Typed, indexable due date. Kept in sync with metadata->>'due' by the
+--     application write paths (store.add_memory / store.update_metadata).
+alter table memories
+  add column if not exists due_at timestamptz;
+
+create index if not exists memories_user_due_idx
+  on memories (user_id, due_at);
+
+-- One-time backfill of due_at from any existing metadata.due values.
+update memories
+  set due_at = (metadata->>'due')::timestamptz
+  where (metadata ? 'due') and metadata->>'due' is not null and due_at is null;
+
 -- 4. RPC for semantic search — called by store.search_memories()
+--    Drop first: CREATE OR REPLACE can't change an existing function's return
+--    type (the returned columns changed when metadata was added in Phase 19).
+drop function if exists match_memories(vector, uuid, integer);
 create or replace function match_memories(
   query_embedding vector(768),
   match_user_id   uuid,

@@ -14,9 +14,10 @@ const CHIPS = [
 
 interface EmptyStateProps {
   onSuggestion: (text: string) => void;
+  onAskMemory: (content: string) => void;
 }
 
-export default function EmptyState({ onSuggestion }: EmptyStateProps) {
+export default function EmptyState({ onSuggestion, onAskMemory }: EmptyStateProps) {
   const [firstName, setFirstName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function EmptyState({ onSuggestion }: EmptyStateProps) {
             ))}
           </div>
         </div>
-        <RecentMemories onSuggestion={onSuggestion} />
+        <RecentMemories onAskMemory={onAskMemory} />
       </div>
     </div>
   );

@@ -101,8 +101,9 @@ web/                            ← Next.js (Phase 7)
 | `user_id`   | `uuid`         | Owner; Phase 5+ references `auth.users`            |
 | `content`   | `text`         | The memory text                                    |
 | `embedding` | `vector(768)`  | Must equal the embedding model's output dimension  |
-| `metadata`  | `jsonb`        | Reserved; default `'{}'`                            |
+| `metadata`  | `jsonb`        | Pin/tags/due etc.; default `'{}'`                  |
 | `created_at`| `timestamptz`  | Default `now()` — used by temporal recall          |
+| `due_at`    | `timestamptz`  | Phase 24. Typed due date, mirrors `metadata.due`; indexed for due-window queries |
 
 Indexes:
 ```sql
@@ -359,3 +360,80 @@ Phases 9–11: detailed in `TDD-v3.md §3–§5`. Summary:
   `requirements.txt` if missing.
 - Supabase free-tier inactivity-pause behaviour for long idle gaps.
 - Whether to surface the optional `source` field in the UI now or later.
+
+---
+
+## 18. Wave 3 — Accuracy & dates (phases 23–25)
+
+File-level design for the accuracy/date/forget fixes. Phases 12–22 detail lives in
+`TDD-v3.md` Part II; this section is the technical record for 23–25.
+
+### 18.1 Phase 23 — Accurate recall
+
+**Memory deep-dive (R23.1).** A "recall" mode that bypasses intent routing and temporal
+parsing and does a grounded semantic lookup of one memory — so clicking a note can't be
+mis-routed to STORE or hijacked by a date/`due`/`task` word in the note's text.
+
+- `api/routers/chat.py` — `ChatRequest` gains `mode: str | None`. When `mode == "recall"`,
+  the endpoint forces `intent = "query"` and threads `semantic_only=True` through
+  `_handle_query` / `_stream_chat`, skipping `extract_due_range` + `extract_range` and going
+  straight to embed → `search_memories` → `synthesize_answer`.
+- `web/lib/api.ts` — `postChat(msg, {mode})` and `postChatStream(msg, retries, onFc, {mode})`
+  pass `mode` in the body.
+- `web/app/chat/page.tsx` — `handleSend` refactored into a reusable `sendText(text, opts)`;
+  new `handleAskMemory(content)` sends `"Tell me about: <content>"` with `{ mode: "recall" }`.
+- `web/components/chat/{EmptyState,RecentMemories}.tsx` — memory cards (recent **and** due)
+  call `onAskMemory(content)` instead of stuffing the whole note into a `What do I know
+  about: …?` query string.
+
+**Relevance floor (R23.2).** `recall/llm.py` `_filter_relevant(memories)` keeps results
+with `similarity ≥ max(0.2, top − 0.2)` (search returns descending similarity). Applied at
+the head of `synthesize_answer` / `_stream` / `_stream_async`; if nothing survives →
+`_NO_MEMORIES` (no-hallucination intact). `recall/prompts.py` `_SYSTEM_PROMPT` rewritten to
+lead with a direct answer, use only the relevant memory, and refuse to guess.
+
+### 18.2 Phase 24 — Due-date recall
+
+**Schema.** `supabase/schema.sql`: `alter table memories add column if not exists due_at
+timestamptz;` + `memories_user_due_idx (user_id, due_at)` + a one-time backfill from
+`metadata->>'due'`. **The migration must be run before deploying this code** — writes now
+set `due_at`, which errors if the column is absent.
+
+**Write paths keep `due_at` ≡ `metadata.due`.** `store.add_memory` sets `row["due_at"]`
+when `metadata.due` is present; `store.update_metadata` sets `due_at` whenever `"due"` is in
+the updates. (Existing callers already compute `metadata.due` via `temporal.extract_due`.)
+
+**Read paths.** `store.list_due` now filters the `due_at` column; new
+`store.list_due_in_range(client, user_id, start, end)` returns memories whose `due_at` is in
+`[start, end)`, soonest first.
+
+**Query routing.** `temporal.extract_due_range(text, tz, now)` returns a `(start, end,
+label)` window **only** when `_DUE_INTENT_RE` matches (due/deadline/overdue/to-do/task/
+reminder/upcoming/"have to do"/scheduled…). Windows: overdue → `(far_past, now)`; tomorrow;
+today (full day); this/next week; generic → overdue + next 7 days (`label="soon"`). The
+query path (`api/routers/chat.py _handle_query` + `_stream_chat`, and `recall/cli.py
+_do_query`) checks `extract_due_range` **before** `extract_range`, so "what's due today"
+filters `due_at` while "what did I save today" still filters `created_at`.
+`recall/llm.py summarize_due_window(_stream_async)` + `recall/prompts.py
+_DUE_SUMMARY_SYSTEM` present the window (empty → `"Nothing due {label}."`).
+
+**R24.3 (adjacent fix).** `temporal.extract_range` now uses word-boundary `re.search` for
+"today/yesterday/this week" instead of whole-string equality, so natural phrasing
+("what did I tell you today?") triggers temporal recall.
+
+### 18.3 Phase 25 — Forget precision & dialog fix
+
+- `api/routers/chat.py _resolve_forget_candidates` + `recall/cli.py _do_forget_natural`:
+  the temporal-range branch now fires **only** when `_FORGET_BULK_RE`
+  (`everything|all|every|each`) also matches; otherwise the default path returns the single
+  top semantic match (`results[0]` if `similarity ≥ 0.6`). `_FORGET_ALL_RE` ("forget
+  everything") still returns the whole store.
+- `web/app/chat/page.tsx`: the `ForgetConfirm` overlay moved from `bottom-24 z-10` to
+  `bottom-32 sm:bottom-36 z-[60]` so it clears and sits above the `z-50` input bar.
+
+### 18.4 Tests (network-free, to add)
+
+`temporal.extract_due_range` (due phrases → correct window/label; non-due → None; due takes
+precedence over `extract_range`); `temporal.extract_range` word-boundary matching;
+`llm._filter_relevant` (floor + spread, empty-in/empty-out); forget bulk-gating
+(`_FORGET_BULK_RE` present vs absent).

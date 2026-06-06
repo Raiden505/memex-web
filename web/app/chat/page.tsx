@@ -67,8 +67,8 @@ export default function ChatPage() {
     setTimeout(() => inputRef.current?.focus(), 10);
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  const sendText = useCallback(async (rawText: string, opts?: { mode?: string }) => {
+    const text = rawText.trim();
     if (!text || loading) return;
 
     setInput("");
@@ -115,9 +115,10 @@ export default function ChatPage() {
     try {
       let captured: ForgetCandidate[] | null = null;
 
+      const streamOpts = opts?.mode ? { mode: opts.mode } : {};
       const stream = postChatStream(text, 1, (candidates) => {
         captured = candidates;
-      });
+      }, streamOpts);
       let first = true;
 
       for await (const token of stream) {
@@ -139,7 +140,7 @@ export default function ChatPage() {
     } catch (err) {
       console.error("[stream] fallback:", err);
       try {
-        const res = await postChat(text);
+        const res = await postChat(text, opts?.mode ? { mode: opts.mode } : {});
         replaceLoading(res.reply);
         if (res.forget_candidates && res.forget_candidates.length > 0) {
           setPendingForget({ loadingId, candidates: res.forget_candidates, originalMsg: text });
@@ -153,17 +154,25 @@ export default function ChatPage() {
         inputRef.current?.focus();
       }
     }
-  }, [input, loading, captureMode]);
+  }, [loading, captureMode]);
+
+  const handleSend = useCallback(() => {
+    void sendText(input);
+  }, [input, sendText]);
 
   const handleSuggestion = useCallback(
     (text: string) => {
-      setInput(text);
-      setTimeout(() => {
-        inputRef.current?.focus();
-        handleSend();
-      }, 0);
+      void sendText(text);
     },
-    [handleSend]
+    [sendText]
+  );
+
+  // Memory deep-dive: a grounded, semantic-only lookup of one specific memory.
+  const handleAskMemory = useCallback(
+    (content: string) => {
+      void sendText(`Tell me about: ${content}`, { mode: "recall" });
+    },
+    [sendText]
   );
 
   const handleForgetConfirm = useCallback(
@@ -209,12 +218,12 @@ export default function ChatPage() {
       {booting ? (
         <SplashTransition />
       ) : messages.length === 0 ? (
-        <EmptyState onSuggestion={handleSuggestion} />
+        <EmptyState onSuggestion={handleSuggestion} onAskMemory={handleAskMemory} />
       ) : (
         <MessageList messages={messages} />
       )}
       {pendingForget && (
-        <div className="fixed bottom-24 left-0 right-0 z-10 px-6">
+        <div className="fixed bottom-32 sm:bottom-36 left-0 right-0 z-[60] px-6">
           <div className="max-w-[800px] mx-auto">
             <ForgetConfirm
               candidates={pendingForget.candidates}

@@ -9,10 +9,13 @@ MEMEX_VOICE = (
 _NO_MEMORIES = "I don't have anything saved about that yet."
 
 _SYSTEM_PROMPT = (
-    "Answer the user's question using ONLY the memories listed below. "
-    "Be concise and natural. "
-    "If the memories don't contain the answer, say you don't have anything saved about that. "
-    "Never invent details.\n\n"
+    "You answer using ONLY the memories listed below — these are the user's own saved notes.\n"
+    "- Lead with a direct answer in one or two sentences.\n"
+    "- Base it on the memory that actually bears on the question; ignore any listed "
+    "memory that isn't relevant.\n"
+    "- If the memories don't genuinely answer the question, say you don't have anything "
+    "saved about that — never guess or fill gaps.\n"
+    "- Never invent names, dates, numbers, or details that aren't in the memories.\n\n"
     + MEMEX_VOICE
 )
 
@@ -48,6 +51,13 @@ _PERSONA_PROMPT = (
 _SUMMARY_SYSTEM = (
     "List or summarise what the user saved in the given time window. "
     "Use ONLY the items listed below. Be concise. Do not invent items.\n\n"
+    + MEMEX_VOICE
+)
+
+_DUE_SUMMARY_SYSTEM = (
+    "List what the user has due in the given time window, soonest first. "
+    "Use ONLY the items listed below, and mention when each is due. "
+    "Be concise. Never invent items or dates.\n\n"
     + MEMEX_VOICE
 )
 

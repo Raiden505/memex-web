@@ -5,7 +5,7 @@ import { getMemories, getDueMemories } from "@/lib/api";
 import type { Memory, Message } from "@/types";
 
 interface RecentMemoriesProps {
-  onSuggestion: (text: string) => void;
+  onAskMemory: (content: string) => void;
 }
 
 function relativeDate(date: Date): string {
@@ -36,7 +36,7 @@ function formatDue(dueIso: string): { label: string; overdue: boolean } {
   return { label: `due in ${diffDays}d`, overdue: false };
 }
 
-export default function RecentMemories({ onSuggestion }: RecentMemoriesProps) {
+export default function RecentMemories({ onAskMemory }: RecentMemoriesProps) {
   const [items, setItems] = useState<Message[] | null>(null);
   const [dueItems, setDueItems] = useState<Memory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +112,7 @@ export default function RecentMemories({ onSuggestion }: RecentMemoriesProps) {
               return (
                 <button
                   key={m.id}
-                  onClick={() => onSuggestion(`Tell me about: ${m.content}`)}
+                  onClick={() => onAskMemory(m.content)}
                   className="flex-shrink-0 w-52 text-left rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-3 hover:bg-surface-container hover:border-outline-variant transition-colors active:scale-[0.98] duration-150 elevation-1"
                 >
                   <p className="font-body-md text-body-md text-on-surface line-clamp-2 mb-2">
@@ -135,7 +135,7 @@ export default function RecentMemories({ onSuggestion }: RecentMemoriesProps) {
             {items!.map((m) => (
               <button
                 key={m.id}
-                onClick={() => onSuggestion(`What do I know about: ${m.content}?`)}
+                onClick={() => onAskMemory(m.content)}
                 className="text-left rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4 hover:bg-surface-container hover:border-outline-variant transition-colors active:scale-[0.98] duration-150 elevation-1"
               >
                 <p className="font-body-md text-body-md text-on-surface line-clamp-2 mb-2">
