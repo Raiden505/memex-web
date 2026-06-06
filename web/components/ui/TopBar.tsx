@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import Icon from "@/components/ui/Icon";
 import SettingsMenu from "@/components/ui/SettingsMenu";
@@ -31,6 +32,7 @@ export default function TopBar({ onCapture }: TopBarProps) {
     <header className="fixed top-0 w-full z-50 bg-surface/70 glass-header border-b-[0.5px] border-outline-variant/30">
       <div className="flex justify-between items-center h-16 px-6 max-w-[800px] mx-auto">
         <div className="flex items-center gap-2 select-none">
+          <Image src="/icon.png" alt="Memex" width={28} height={28} className="rounded-lg" />
           <h1 className="font-headline-md text-headline-md font-bold tracking-tight text-primary">
             Memex
           </h1>

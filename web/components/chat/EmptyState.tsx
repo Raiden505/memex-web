@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
-import Icon from "@/components/ui/Icon";
 import RecentMemories from "./RecentMemories";
 
 const CHIPS = [
@@ -35,8 +35,8 @@ export default function EmptyState({ onSuggestion, onAskMemory }: EmptyStateProp
         style={{ maxWidth: "800px", gap: "12px", paddingTop: "96px" }}
       >
         <div className="flex flex-col items-center text-center select-none pt-8 pb-6">
-          <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mb-5 elevation-1">
-            <Icon name="psychology" size={32} className="text-on-primary" />
+          <div className="mb-5">
+            <Image src="/icon.png" alt="Memex" width={56} height={56} className="rounded-2xl elevation-1" />
           </div>
           <h2 className="font-headline-md text-headline-md text-on-surface mb-2">
             {firstName ? `Welcome back, ${firstName}.` : "Welcome back."}

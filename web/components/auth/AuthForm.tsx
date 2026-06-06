@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { isDuplicateSignup, mapAuthError } from "@/lib/auth-helpers";
 import Icon from "@/components/ui/Icon";
@@ -90,6 +91,9 @@ export default function AuthForm() {
   return (
     <main className="w-full max-w-[440px] z-10">
       <header className="text-center mb-10">
+        <div className="flex justify-center mb-4">
+          <Image src="/icon.png" alt="Memex" width={64} height={64} className="rounded-2xl" />
+        </div>
         <h1 className="tracking-tight mb-2 text-primary" style={{ fontFamily: "var(--font-manrope)", fontSize: "40px", lineHeight: "48px", letterSpacing: "-0.02em", fontWeight: 700 }}>Memex</h1>
         <p className="font-body-md text-body-md text-on-surface-variant">Cognitive clarity for your second brain.</p>
       </header>

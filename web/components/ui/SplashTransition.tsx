@@ -1,4 +1,4 @@
-import Icon from "@/components/ui/Icon";
+import Image from "next/image";
 
 export default function SplashTransition() {
   return (
@@ -10,7 +10,7 @@ export default function SplashTransition() {
         >
           Memex
         </h1>
-        <Icon name="psychology" size={28} className="text-outline" />
+        <Image src="/icon.png" alt="Memex" width={48} height={48} className="rounded-xl" />
         <div className="w-32 h-1 bg-surface-container rounded-full overflow-hidden">
           <div className="h-full bg-primary-fixed-dim rounded-full" style={{ animation: "splash-progress 1.2s ease-in-out infinite", width: "60%" }} />
         </div>

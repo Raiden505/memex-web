@@ -17,6 +17,13 @@ export default function manifest(): MetadataRoute.Manifest {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         purpose: "any maskable" as any,
       },
+      {
+        src: "/icon.png",
+        sizes: "512x512",
+        type: "image/png",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        purpose: "any maskable" as any,
+      },
     ],
   };
 }
