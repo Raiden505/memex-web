@@ -212,3 +212,55 @@ def test_single_word_non_greeting_calls_classifier():
     with patch(_PATCH, return_value="store") as mock:
         route("coffee", None)
         mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Quick win: conversation-history follow-up routing
+# ---------------------------------------------------------------------------
+
+def test_follow_up_short_phrase_routes_to_query():
+    # After a query, a short bare phrase like "his email" should be a follow-up.
+    history = [{"role": "assistant", "content": "Ahmed is your dentist."}]
+    with patch(_PATCH) as mock:
+        result = route("his email", None, history=history)
+        assert result == "query"
+        mock.assert_not_called()
+
+
+def test_follow_up_pronoun_starter_routes_to_query():
+    history = [{"role": "assistant", "content": "You saved a note about the meeting."}]
+    with patch(_PATCH) as mock:
+        assert route("what about the dentist?", None, history=history) == "query"
+        assert route("when was that?", None, history=history) == "query"
+        assert route("how do I get there?", None, history=history) == "query"
+        mock.assert_not_called()
+
+
+def test_follow_up_preposition_starter_routes_to_query():
+    history = [{"role": "assistant", "content": "The report is due Friday."}]
+    with patch(_PATCH) as mock:
+        assert route("on what date?", None, history=history) == "query"
+        assert route("for which client?", None, history=history) == "query"
+        mock.assert_not_called()
+
+
+def test_no_history_falls_through_to_classifier():
+    with patch(_PATCH, return_value="store") as mock:
+        route("his email", None, history=None)
+        mock.assert_called_once()
+
+
+def test_last_turn_was_user_not_assistant_falls_through():
+    # If the last entry is a user message, this is NOT a follow-up to an assistant reply.
+    history = [{"role": "user", "content": "What did I save?"}]
+    with patch(_PATCH, return_value="store") as mock:
+        route("his email", None, history=history)
+        mock.assert_called_once()
+
+
+def test_long_statement_after_assistant_falls_through():
+    # A long statement after an assistant reply is probably a new topic, not a follow-up.
+    history = [{"role": "assistant", "content": "You saved a note about the meeting."}]
+    with patch(_PATCH, return_value="store") as mock:
+        route("I need to remember to buy groceries after work and call my mom", None, history=history)
+        mock.assert_called_once()

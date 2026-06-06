@@ -2,6 +2,8 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from dateparser.search import search_dates
+
 _DAYS_RE = re.compile(r"(?:last|past)\s+(\d+)\s+days?", re.IGNORECASE)
 _FUTURE_DAYS_RE = re.compile(r"\bin\s+(\d+)\s+(days?|weeks?|months?)\b", re.IGNORECASE)
 _TIME_RE = re.compile(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
@@ -60,7 +62,8 @@ def _resolve_tz(tz: str | None) -> ZoneInfo:
     return _UTC
 
 
-def extract_range(text: str, tz: str | None = None, now: datetime | None = None) -> tuple[datetime, datetime, str] | None:
+def _now_tuple(tz: str | None, now: datetime | None) -> tuple[ZoneInfo, datetime]:
+    """Return (tz_obj, aware_now)."""
     if now is None:
         tz_obj = _resolve_tz(tz)
         now = datetime.now(tz_obj)
@@ -69,53 +72,83 @@ def extract_range(text: str, tz: str | None = None, now: datetime | None = None)
     else:
         tz_obj = _resolve_tz(tz)
         now = now.replace(tzinfo=tz_obj)
+    return tz_obj, now
 
-    local_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
+def _utc(dt: datetime) -> datetime:
+    """Convert an aware datetime to naive UTC."""
+    return dt.astimezone(_UTC).replace(tzinfo=None)
+
+
+def _midnight(dt: datetime) -> datetime:
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+# dateparser.search sometimes hallucinates dates from random words (e.g. "me" → today).
+# We reject any match whose substring contains no digits and no month name.
+_DATE_SUBSTRING_RE = re.compile(
+    r"\d|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|"
+    r"january|february|march|april|june|july|august|september|october|november|december",
+    re.IGNORECASE,
+)
+
+
+def _parse_dates(text: str, tz_str: str, now: datetime, *, prefer_future: bool = False) -> list[tuple[str, datetime]] | None:
+    """Use dateparser to find all dates in text. Returns None if none found."""
+    settings = {
+        "TIMEZONE": tz_str,
+        "RETURN_AS_TIMEZONE_AWARE": True,
+        "PREFER_DATES_FROM": "future" if prefer_future else "current_period",
+        "RELATIVE_BASE": now,
+        "STRICT_PARSING": False,
+    }
+    try:
+        results = search_dates(text, settings=settings)
+    except Exception:
+        return None
+    if not results:
+        return None
+    # Filter out hallucinated matches (random words interpreted as dates).
+    filtered = [r for r in results if _DATE_SUBSTRING_RE.search(r[0])]
+    return filtered if filtered else None
+
+
+def extract_range(text: str, tz: str | None = None, now: datetime | None = None) -> tuple[datetime, datetime, str] | None:
+    """For created-at questions, return the [start, end) window (naive UTC) to filter
+    `created_at` on, plus a human label. Returns None if the text isn't about time ranges.
+    """
+    tz_obj, now = _now_tuple(tz, now)
+    local_midnight = _midnight(now)
     lower = text.strip().lower()
 
-    # Match these as words anywhere in the question ("what did I tell you today?"),
-    # not just as the whole message.
+    # 1. App-specific relative words with custom semantics
     if re.search(r"\btoday\b", lower):
-        start = local_midnight
-        end = now
-        start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-        end_utc = end.astimezone(_UTC).replace(tzinfo=None)
-        return (start_utc, end_utc, "today")
+        return (_utc(local_midnight), _utc(now), "today")
 
     if re.search(r"\byesterday\b", lower):
         yesterday = local_midnight - timedelta(days=1)
-        start = yesterday
-        end = local_midnight
-        start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-        end_utc = end.astimezone(_UTC).replace(tzinfo=None)
-        return (start_utc, end_utc, "yesterday")
+        return (_utc(yesterday), _utc(local_midnight), "yesterday")
 
     if re.search(r"\bthis\s+week\b", lower):
-        weekday = local_midnight.weekday()
-        start = local_midnight - timedelta(days=weekday)
-        end = now
-        start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-        end_utc = end.astimezone(_UTC).replace(tzinfo=None)
-        return (start_utc, end_utc, "this week")
+        week_start = local_midnight - timedelta(days=local_midnight.weekday())
+        return (_utc(week_start), _utc(now), "this week")
 
     m = _DAYS_RE.search(lower)
     if m:
         n = int(m.group(1))
         start = now - timedelta(days=n)
-        start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-        end_utc = now.astimezone(_UTC).replace(tzinfo=None)
-        return (start_utc, end_utc, f"the last {n} day{'s' if n != 1 else ''}")
+        return (_utc(start), _utc(now), f"the last {n} day{'s' if n != 1 else ''}")
 
+    # 2. ISO exact-match (whole string)
     iso_match = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", text.strip())
     if iso_match:
         y, mth, d = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
         start = datetime(y, mth, d, tzinfo=tz_obj)
         end = start + timedelta(days=1)
-        start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-        end_utc = end.astimezone(_UTC).replace(tzinfo=None)
-        return (start_utc, end_utc, f"on {text.strip()}")
+        return (_utc(start), _utc(end), f"on {text.strip()}")
 
+    # 3. Weekday name (last occurrence) — checked before dateparser so we control
+    #    the semantics (last Monday vs next Monday).
     words = lower.split()
     for w in words:
         if w in _WEEKDAYS:
@@ -126,9 +159,24 @@ def extract_range(text: str, tz: str | None = None, now: datetime | None = None)
                 delta = 7
             start = local_midnight - timedelta(days=7 - delta)
             end = start + timedelta(days=1)
-            start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-            end_utc = end.astimezone(_UTC).replace(tzinfo=None)
-            return (start_utc, end_utc, f"on {w}")
+            return (_utc(start), _utc(end), f"on {w}")
+
+    # 4. dateparser for exact calendar dates (e.g. "6th June", "June 15", "15/06/2024")
+    parsed_list = _parse_dates(text, str(tz_obj), now, prefer_future=False)
+    if parsed_list:
+        if len(parsed_list) >= 2:
+            # Range query like "from June 1 to June 15"
+            _, dt1 = parsed_list[0]
+            _, dt2 = parsed_list[1]
+            start = _midnight(min(dt1, dt2))
+            end = _midnight(max(dt1, dt2)) + timedelta(days=1)
+            label = f"from {start.strftime('%B %d')} to {end.strftime('%B %d')}"
+            return (_utc(start), _utc(end), label)
+        _, dt = parsed_list[0]
+        day_start = _midnight(dt)
+        day_end = day_start + timedelta(days=1)
+        label = f"on {day_start.strftime('%B %d, %Y')}"
+        return (_utc(day_start), _utc(day_end), label)
 
     return None
 
@@ -138,9 +186,6 @@ def extract_due_range(
 ) -> tuple[datetime, datetime, str] | None:
     """For due-date questions, return the [start, end) window (naive UTC) to filter
     `due_at` on, plus a human label. Returns None if the text isn't about due dates.
-
-    Unlike `extract_range` (which is about when memories were *created*), this is
-    about when things are *due* and is the path for "what's due today / this week".
     """
     if not _DUE_INTENT_RE.search(text):
         return None
@@ -149,16 +194,8 @@ def extract_due_range(
     if _CREATION_INTENT_RE.search(text):
         return None
 
-    if now is None:
-        tz_obj = _resolve_tz(tz)
-        now = datetime.now(tz_obj)
-    elif now.tzinfo is not None:
-        tz_obj = now.tzinfo
-    else:
-        tz_obj = _resolve_tz(tz)
-        now = now.replace(tzinfo=tz_obj)
-
-    local_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tz_obj, now = _now_tuple(tz, now)
+    local_midnight = _midnight(now)
     far_past = local_midnight - timedelta(days=3650)
     lower = text.lower()
 
@@ -177,11 +214,20 @@ def extract_due_range(
         week_start = local_midnight - timedelta(days=local_midnight.weekday())
         start, end, label = week_start, week_start + timedelta(days=7), "this week"
     else:
+        # Try dateparser for exact due dates (e.g. "what's due on 6th June?")
+        parsed_list = _parse_dates(text, str(tz_obj), now, prefer_future=True)
+        if parsed_list:
+            _, dt = parsed_list[0]
+            start = _midnight(dt)
+            end = start + timedelta(days=1)
+            label = f"on {start.strftime('%B %d, %Y')}"
+            return (_utc(start), _utc(end), label)
+
         # Generic "what's due / what do I have to do" → overdue + the next 7 days.
         start, end, label = far_past, local_midnight + timedelta(days=8), "soon"
 
-    start_utc = start.astimezone(_UTC).replace(tzinfo=None)
-    end_utc = end.astimezone(_UTC).replace(tzinfo=None)
+    start_utc = _utc(start)
+    end_utc = _utc(end)
     return (start_utc, end_utc, label)
 
 
@@ -202,24 +248,16 @@ def _apply_time(dt: datetime, lower: str) -> datetime:
 
 def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -> datetime | None:
     """Return the first future due-date found in `text`, as a naive UTC datetime, or None."""
-    if now is None:
-        tz_obj = _resolve_tz(tz)
-        now = datetime.now(tz_obj)
-    elif now.tzinfo is None:
-        tz_obj = _resolve_tz(tz)
-        now = now.replace(tzinfo=tz_obj)
-    else:
-        tz_obj = now.tzinfo
-
-    local_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tz_obj, now = _now_tuple(tz, now)
+    local_midnight = _midnight(now)
     lower = text.lower()
 
     def _future_utc(dt: datetime) -> datetime | None:
         if dt > now:
-            return dt.astimezone(_UTC).replace(tzinfo=None)
+            return _utc(dt)
         return None
 
-    # "today" — use specific time if present, else end-of-day
+    # 1. "today" — use specific time if present, else end-of-day
     if re.search(r"\btoday\b", lower):
         due = _apply_time(local_midnight, lower)
         if due == local_midnight:
@@ -228,14 +266,14 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
         if result:
             return result
 
-    # "tomorrow"
+    # 2. "tomorrow"
     if re.search(r"\btomorrow\b", lower):
         due = _apply_time(local_midnight + timedelta(days=1), lower)
         result = _future_utc(due)
         if result:
             return result
 
-    # "in N days / weeks / months"
+    # 3. "in N days / weeks / months"
     m = _FUTURE_DAYS_RE.search(lower)
     if m:
         n = int(m.group(1))
@@ -250,7 +288,7 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
         if result:
             return result
 
-    # "next week" → next Monday
+    # 4. "next week" → next Monday
     if re.search(r"\bnext\s+week\b", lower):
         days_ahead = (7 - local_midnight.weekday()) % 7 or 7
         due = local_midnight + timedelta(days=days_ahead)
@@ -258,7 +296,7 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
         if result:
             return result
 
-    # "next month" → 1st of next month
+    # 5. "next month" → 1st of next month
     if re.search(r"\bnext\s+month\b", lower):
         if local_midnight.month == 12:
             due = local_midnight.replace(year=local_midnight.year + 1, month=1, day=1)
@@ -268,7 +306,7 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
         if result:
             return result
 
-    # "next [weekday]" or "on [weekday]"
+    # 6. "next [weekday]" or "on [weekday]"
     wd_match = re.search(
         r"\b(?:next|on)\s+(" + "|".join(sorted(_WEEKDAY_MAP.keys(), key=len, reverse=True)) + r")\b",
         lower,
@@ -282,7 +320,16 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
         if result:
             return result
 
-    # "[Month] [Day]" e.g. "June 15" — this year if future, else next year
+    # 7. dateparser for exact calendar dates (e.g. "6th June", "June 15", "15/06/2024")
+    parsed_list = _parse_dates(text, str(tz_obj), now, prefer_future=True)
+    if parsed_list:
+        _, dt = parsed_list[0]
+        due = _apply_time(dt, lower)
+        result = _future_utc(due)
+        if result:
+            return result
+
+    # 8. "[Month] [Day]" e.g. "June 15" — this year if future, else next year
     mo_match = _MONTH_NAMES_RE.search(text)
     if mo_match:
         month_num = _MONTH_MAP.get(mo_match.group(1).lower(), 0)
@@ -304,7 +351,7 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
                     if result:
                         return result
 
-    # ISO date "YYYY-MM-DD"
+    # 9. ISO date "YYYY-MM-DD"
     iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", text)
     if iso_match:
         y, mth, d = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))

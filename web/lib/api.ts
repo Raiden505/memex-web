@@ -103,8 +103,8 @@ export async function setPinned(id: string, pinned: boolean): Promise<{ id: stri
 
 export async function postChat(
   message: string,
-  opts: { confirmForget?: string[]; mode?: string } = {}
-): Promise<{ intent: string; reply: string; id: string | null; source: string | null; forget_candidates?: ForgetCandidate[] }> {
+  opts: { confirmForget?: string[]; mode?: string; forceStore?: boolean; history?: { role: string; content: string }[] } = {}
+): Promise<{ intent: string; reply: string; id: string | null; source: string | null; forget_candidates?: ForgetCandidate[]; duplicate_of?: { id: string; content: string; created_at: string } | null }> {
   return fetchApi("/chat", {
     method: "POST",
     body: JSON.stringify({
@@ -112,6 +112,8 @@ export async function postChat(
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       ...(opts.confirmForget !== undefined ? { confirm_forget: opts.confirmForget } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
+      ...(opts.forceStore ? { force_store: true } : {}),
+      ...(opts.history ? { history: opts.history } : {}),
     }),
   });
 }
@@ -120,7 +122,8 @@ export async function* postChatStream(
   message: string,
   retries = 1,
   onForgetCandidates?: (candidates: ForgetCandidate[]) => void,
-  opts: { mode?: string } = {}
+  onDuplicate?: (dup: { id: string; content: string; created_at: string }) => void,
+  opts: { mode?: string; forceStore?: boolean; history?: { role: string; content: string }[] } = {}
 ): AsyncGenerator<string, void, unknown> {
   const token = await getToken();
 
@@ -136,6 +139,8 @@ export async function* postChatStream(
           message,
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           ...(opts.mode ? { mode: opts.mode } : {}),
+          ...(opts.forceStore ? { force_store: true } : {}),
+          ...(opts.history ? { history: opts.history } : {}),
         }),
       });
 
@@ -172,6 +177,10 @@ export async function* postChatStream(
             }
             if (obj.fc && onForgetCandidates) {
               onForgetCandidates(obj.fc as ForgetCandidate[]);
+              continue;
+            }
+            if (obj.dup && onDuplicate) {
+              onDuplicate(obj.dup as { id: string; content: string; created_at: string });
               continue;
             }
             if (obj.t !== undefined) {

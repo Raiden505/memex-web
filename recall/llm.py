@@ -25,6 +25,12 @@ _VALID_TAGS = frozenset({"idea", "task", "person", "place", "work", "personal", 
 _RELEVANCE_FLOOR = 0.2
 _RELEVANCE_SPREAD = 0.2
 
+# Quick win: minimum shared vocabulary between an answer and the memories it claims
+# to be grounded in. If the answer shares no meaningful words with any memory,
+# it's likely hallucinated and we fall back to the no-memories response.
+_GROUNDING_MIN_UNIQUE_WORDS = 1
+_GROUNDING_MIN_WORD_LEN = 4
+
 
 def _filter_relevant(memories: list[SearchResult]) -> list[SearchResult]:
     if not memories:
@@ -32,6 +38,40 @@ def _filter_relevant(memories: list[SearchResult]) -> list[SearchResult]:
     top = memories[0].similarity
     cutoff = max(_RELEVANCE_FLOOR, top - _RELEVANCE_SPREAD)
     return [m for m in memories if m.similarity >= cutoff]
+
+
+def _is_answer_grounded(answer: str, memory_texts: list[str]) -> bool:
+    """Quick lexical grounding check — returns False if the answer appears to
+    contain no substantive vocabulary from the provided memories."""
+    if not answer or not memory_texts:
+        return True  # vacuously true (no claim to ground)
+
+    answer_lower = answer.lower()
+    memory_words: set[str] = set()
+    for text in memory_texts:
+        for word in text.lower().split():
+            clean = "".join(ch for ch in word if ch.isalnum())
+            if len(clean) >= _GROUNDING_MIN_WORD_LEN:
+                memory_words.add(clean)
+
+    shared = 0
+    for word in memory_words:
+        if word in answer_lower:
+            shared += 1
+            if shared >= _GROUNDING_MIN_UNIQUE_WORDS:
+                return True
+
+    # Also accept if any alphanumeric substring of length >= 8 from a memory
+    # appears in the answer (catches direct quotes, names, numbers, etc.).
+    for text in memory_texts:
+        lower = text.lower()
+        # sliding window of length 8
+        for i in range(len(lower) - 7):
+            substr = lower[i : i + 8]
+            if substr in answer_lower:
+                return True
+
+    return False
 
 
 def save_ack(content: str | None = None, rng=None) -> str:
@@ -77,7 +117,10 @@ def synthesize_answer(question: str, memories: list[SearchResult], cfg: Config) 
             temperature=0.2,
         ),
     )
-    return response.text.strip()
+    answer = response.text.strip()
+    if not _is_answer_grounded(answer, [m.content for m in memories]):
+        return _NO_MEMORIES
+    return answer
 
 
 def synthesize_answer_stream(question: str, memories: list[SearchResult], cfg: Config) -> Generator[str, None, None]:
@@ -215,7 +258,10 @@ def summarize_window(memories: list[Memory], label: str, cfg: Config) -> str:
             temperature=0.2,
         ),
     )
-    return response.text.strip()
+    answer = response.text.strip()
+    if not _is_answer_grounded(answer, [m.content for m in memories]):
+        return f"Nothing saved {label}."
+    return answer
 
 
 def summarize_window_stream(memories: list[Memory], label: str, cfg: Config) -> Generator[str, None, None]:
@@ -288,7 +334,10 @@ def summarize_due_window(memories: list[Memory], label: str, cfg: Config) -> str
             temperature=0.2,
         ),
     )
-    return response.text.strip()
+    answer = response.text.strip()
+    if not _is_answer_grounded(answer, [m.content for m in memories]):
+        return f"Nothing due {label}."
+    return answer
 
 
 async def summarize_due_window_stream_async(memories: list[Memory], label: str, cfg: Config):

@@ -10,6 +10,7 @@ from supabase import Client
 from api.dependencies import get_current_user, get_db
 from recall import embeddings, llm, router, store, temporal
 from recall.config import load_config
+from recall.models import SearchResult
 
 chat_router = APIRouter()
 _cfg = load_config()
@@ -28,6 +29,10 @@ _FORGET_VERB_RE = _re.compile(
 _FORGET_BULK_RE = _re.compile(r"\b(everything|all|every|each)\b", _re.IGNORECASE)
 _FORGET_FLOOR = 0.6
 
+# Quick win: semantic duplicate threshold. If the top search result for the
+# exact same embedding is >= this value, we warn the user instead of saving.
+_DUPLICATE_THRESHOLD = 0.95
+
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
@@ -40,6 +45,10 @@ class ChatRequest(BaseModel):
     # "recall" forces a grounded semantic lookup of a specific memory, skipping
     # intent routing and temporal/due parsing (Phase 23 memory deep-dive).
     mode: str | None = None
+    # Quick win: bypass duplicate warning and save anyway.
+    force_store: bool | None = None
+    # Quick win: recent conversation turns for follow-up routing.
+    history: list[dict] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -48,6 +57,8 @@ class ChatResponse(BaseModel):
     id: str | None = None
     source: str | None = None
     forget_candidates: list[dict] | None = None
+    # Quick win: when a duplicate is detected, the existing memory is returned.
+    duplicate_of: dict | None = None
 
 
 def _handle_query(message: str, user_id: str, db: Client, tz: str | None, semantic_only: bool = False) -> str:
@@ -115,6 +126,14 @@ def _forget_reply(n: int, is_all: bool) -> str:
     return f"I found {n} memories about that — delete them?"
 
 
+def _check_duplicate(db: Client, embedding: list[float], user_id: str) -> SearchResult | None:
+    """Return the top existing memory if it is semantically almost identical."""
+    results = store.search_memories(db, embedding, user_id, k=1)
+    if results and results[0].similarity >= _DUPLICATE_THRESHOLD:
+        return results[0]
+    return None
+
+
 @chat_router.post("")
 async def chat(
     body: ChatRequest,
@@ -148,13 +167,16 @@ async def chat(
         intent = "query"
     else:
         try:
-            intent = router.route(body.message, _cfg)
+            intent = router.route(body.message, _cfg, history=body.history)
         except Exception:
             intent = "store"
 
     if stream:
         return StreamingResponse(
-            _stream_chat(body.message, intent, user_id, db, body.tz, background_tasks, semantic_only),
+            _stream_chat(
+                body.message, intent, user_id, db, body.tz, background_tasks,
+                semantic_only, body.force_store,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
@@ -162,6 +184,17 @@ async def chat(
     try:
         if intent == "store":
             embedding = embeddings.embed(body.message, _cfg, task_type="RETRIEVAL_DOCUMENT")
+            dup = None if body.force_store else _check_duplicate(db, embedding, user_id)
+            if dup:
+                return ChatResponse(
+                    intent="duplicate",
+                    reply=f"That looks very similar to something you saved on {dup.created_at[:10]}. Save anyway?",
+                    duplicate_of={
+                        "id": dup.id,
+                        "content": dup.content,
+                        "created_at": dup.created_at,
+                    },
+                )
             due = temporal.extract_due(body.message, tz=body.tz or "UTC")
             initial_meta = {"due": due.isoformat()} if due else None
             row = store.add_memory(db, body.message, embedding, user_id, metadata=initial_meta)
@@ -197,10 +230,18 @@ async def chat(
 async def _stream_chat(
     message: str, intent: str, user_id: str, db: Client, tz: str | None, bg: BackgroundTasks,
     semantic_only: bool = False,
+    force_store: bool | None = None,
 ):
     try:
         if intent == "store":
             embedding = embeddings.embed(message, _cfg, task_type="RETRIEVAL_DOCUMENT")
+            dup = None if force_store else _check_duplicate(db, embedding, user_id)
+            if dup:
+                warning = f"That looks very similar to something you saved on {dup.created_at[:10]}. Save anyway?"
+                yield _sse({"t": warning})
+                yield _sse({"dup": {"id": dup.id, "content": dup.content, "created_at": dup.created_at}})
+                yield _sse({"done": True})
+                return
             due = temporal.extract_due(message, tz=tz or "UTC")
             initial_meta = {"due": due.isoformat()} if due else None
             row = store.add_memory(db, message, embedding, user_id, metadata=initial_meta)

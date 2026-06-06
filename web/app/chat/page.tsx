@@ -20,6 +20,20 @@ interface PendingForget {
   originalMsg: string;
 }
 
+interface PendingDuplicate {
+  loadingId: string;
+  originalMsg: string;
+  duplicate: { id: string; content: string; created_at: string };
+}
+
+function buildHistory(msgs: Message[]): { role: string; content: string }[] {
+  // Exclude errors, pending shells and forget-candidate system messages
+  const clean = msgs
+    .filter((m) => !m.isError && !m.pending && !m.forgetCandidates)
+    .slice(-6);
+  return clean.map((m) => ({ role: m.role, content: m.content }));
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -28,6 +42,7 @@ export default function ChatPage() {
   const [captureMode, setCaptureMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingForget, setPendingForget] = useState<PendingForget | null>(null);
+  const [pendingDuplicate, setPendingDuplicate] = useState<PendingDuplicate | null>(null);
   const inputRef = useRef<ChatInputHandle>(null);
 
   useEffect(() => {
@@ -67,13 +82,14 @@ export default function ChatPage() {
     setTimeout(() => inputRef.current?.focus(), 10);
   }, []);
 
-  const sendText = useCallback(async (rawText: string, opts?: { mode?: string }) => {
+  const sendText = useCallback(async (rawText: string, opts?: { mode?: string; forceStore?: boolean }) => {
     const text = rawText.trim();
     if (!text || loading) return;
 
     setInput("");
     setLoading(true);
     setPendingForget(null);
+    setPendingDuplicate(null);
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -112,15 +128,31 @@ export default function ChatPage() {
       return;
     }
 
+    const history = buildHistory(messages);
+
     try {
       let captured: ForgetCandidate[] | null = null;
+      let dup: { id: string; content: string; created_at: string } | null = null;
 
-      const streamOpts = opts?.mode ? { mode: opts.mode } : {};
-      const stream = postChatStream(text, 1, (candidates) => {
-        captured = candidates;
-      }, streamOpts);
+      const streamOpts = {
+        ...(opts?.mode ? { mode: opts.mode } : {}),
+        ...(opts?.forceStore ? { forceStore: true } : {}),
+        history,
+      };
+
+      const stream = postChatStream(
+        text,
+        1,
+        (candidates) => {
+          captured = candidates;
+        },
+        (d) => {
+          dup = d;
+        },
+        streamOpts
+      );
+
       let first = true;
-
       for await (const token of stream) {
         if (first) {
           flushSync(() => replaceLoading(token));
@@ -134,16 +166,30 @@ export default function ChatPage() {
         }
       }
 
+      if (dup) {
+        setPendingDuplicate({ loadingId, originalMsg: text, duplicate: dup });
+      }
+
       if (captured && (captured as ForgetCandidate[]).length > 0) {
         setPendingForget({ loadingId, candidates: captured, originalMsg: text });
       }
     } catch (err) {
       console.error("[stream] fallback:", err);
       try {
-        const res = await postChat(text, opts?.mode ? { mode: opts.mode } : {});
-        replaceLoading(res.reply);
-        if (res.forget_candidates && res.forget_candidates.length > 0) {
-          setPendingForget({ loadingId, candidates: res.forget_candidates, originalMsg: text });
+        const res = await postChat(text, {
+          ...(opts?.mode ? { mode: opts.mode } : {}),
+          ...(opts?.forceStore ? { forceStore: true } : {}),
+          history,
+        });
+
+        if (res.intent === "duplicate" && res.duplicate_of) {
+          replaceLoading(res.reply);
+          setPendingDuplicate({ loadingId, originalMsg: text, duplicate: res.duplicate_of });
+        } else {
+          replaceLoading(res.reply);
+          if (res.forget_candidates && res.forget_candidates.length > 0) {
+            setPendingForget({ loadingId, candidates: res.forget_candidates, originalMsg: text });
+          }
         }
       } catch {
         replaceLoading("Couldn't reach memory — try again.", true);
@@ -154,7 +200,7 @@ export default function ChatPage() {
         inputRef.current?.focus();
       }
     }
-  }, [loading, captureMode]);
+  }, [loading, captureMode, messages]);
 
   const handleSend = useCallback(() => {
     void sendText(input);
@@ -213,6 +259,27 @@ export default function ChatPage() {
     if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
   }, [pendingForget]);
 
+  const handleDuplicateConfirm = useCallback(() => {
+    if (!pendingDuplicate) return;
+    const { originalMsg } = pendingDuplicate;
+    setPendingDuplicate(null);
+    void sendText(originalMsg, { forceStore: true });
+  }, [pendingDuplicate, sendText]);
+
+  const handleDuplicateCancel = useCallback(() => {
+    if (!pendingDuplicate) return;
+    const { loadingId } = pendingDuplicate;
+    setPendingDuplicate(null);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === loadingId
+          ? { ...m, content: m.content + "\n\nOkay, kept the original.", pending: false }
+          : m
+      )
+    );
+    if (matchMedia("(pointer: fine)").matches) inputRef.current?.focus();
+  }, [pendingDuplicate]);
+
   return (
     <ChatLayout onCapture={handleCapture}>
       {booting ? (
@@ -230,6 +297,35 @@ export default function ChatPage() {
               onConfirm={handleForgetConfirm}
               onCancel={handleForgetCancel}
             />
+          </div>
+        </div>
+      )}
+      {pendingDuplicate && (
+        <div className="fixed bottom-32 sm:bottom-36 left-0 right-0 z-[60] px-6">
+          <div className="max-w-[800px] mx-auto">
+            <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-4 shadow-lg">
+              <p className="text-sm text-on-surface mb-3">
+                That looks very similar to something you already saved on{" "}
+                {new Date(pendingDuplicate.duplicate.created_at).toLocaleDateString()}.
+              </p>
+              <div className="bg-surface-container rounded-lg p-3 mb-4 text-sm text-on-surface-variant line-clamp-2">
+                {pendingDuplicate.duplicate.content}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={handleDuplicateCancel}
+                  className="px-4 py-2 text-sm rounded-lg bg-surface-container text-on-surface hover:bg-surface-container-high transition-colors"
+                >
+                  Keep Original
+                </button>
+                <button
+                  onClick={handleDuplicateConfirm}
+                  className="px-4 py-2 text-sm rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity"
+                >
+                  Save Anyway
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

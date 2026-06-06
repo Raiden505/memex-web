@@ -133,3 +133,38 @@ class TestSaveAck:
         for ack in SAVE_ACKS:
             assert isinstance(ack, str)
             assert len(ack) > 0
+
+
+# ---------------------------------------------------------------------------
+# _is_answer_grounded (quick-win self-verification)
+# ---------------------------------------------------------------------------
+
+from recall.llm import _is_answer_grounded
+
+
+class TestIsAnswerGrounded:
+    def test_vacuously_true_when_no_memories(self):
+        assert _is_answer_grounded("anything", []) is True
+
+    def test_vacuously_true_when_empty_answer(self):
+        assert _is_answer_grounded("", ["hello world"]) is True
+
+    def test_grounded_when_shared_word_present(self):
+        memories = ["Ahmed's email is ahmed@example.com"]
+        assert _is_answer_grounded("His email is ahmed@example.com", memories) is True
+
+    def test_ungrounded_when_no_shared_substantive_words(self):
+        memories = ["The sky is blue today"]
+        assert _is_answer_grounded("Quantum mechanics is fascinating.", memories) is False
+
+    def test_grounded_by_long_substring_quote(self):
+        memories = ["Meeting rescheduled to 3pm on Thursday"]
+        assert _is_answer_grounded("Sure, the meeting rescheduled to 3pm on Thursday works.", memories) is True
+
+    def test_ungrounded_on_generic_polite_response(self):
+        memories = ["Buy milk and eggs"]
+        assert _is_answer_grounded("You're welcome! Let me know if you need anything else.", memories) is False
+
+    def test_grounded_by_short_but_relevant_answer(self):
+        memories = ["Dentist phone: 555-0199"]
+        assert _is_answer_grounded("555-0199", memories) is True

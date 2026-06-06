@@ -22,6 +22,9 @@ _FORGET_VERB_RE = _re.compile(
 )
 _FORGET_BULK_RE = _re.compile(r"\b(everything|all|every|each)\b", _re.IGNORECASE)
 
+# Quick win: semantic duplicate threshold (same as API).
+_DUPLICATE_THRESHOLD = 0.95
+
 console = Console()
 
 
@@ -40,9 +43,25 @@ def _show_help() -> None:
     console.print(Panel(help_text, title="Commands", border_style="cyan"))
 
 
-def _do_store(text: str, cfg: Config, client: Client) -> None:
+def _do_store(text: str, cfg: Config, client: Client, force: bool = False) -> dict | None:
     with console.status("[cyan]Saving...[/cyan]"):
         embedding = embeddings.embed(text, cfg, task_type="RETRIEVAL_DOCUMENT")
+        if not force:
+            results = store.search_memories(client, embedding, cfg.user_id, k=1)
+            if results and results[0].similarity >= _DUPLICATE_THRESHOLD:
+                dup = results[0]
+                console.print(
+                    f"[yellow]That looks very similar to something you saved on {dup.created_at[:10]}:[/yellow]"
+                )
+                console.print(f"[dim]{dup.content}[/dim]")
+                try:
+                    confirm = input("Save anyway? [y/N] ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    console.print("\n[dim]Cancelled.[/dim]")
+                    return None
+                if confirm != "y":
+                    console.print("[dim]Kept the original.[/dim]")
+                    return None
         due = temporal.extract_due(text)
         initial_meta = {"due": due.isoformat()} if due else None
         row = store.add_memory(client, text, embedding, cfg.user_id, metadata=initial_meta)
@@ -53,9 +72,10 @@ def _do_store(text: str, cfg: Config, client: Client) -> None:
             store.update_metadata(client, row["id"], cfg.user_id, {"tags": tags})
     except Exception:
         pass
+    return row
 
 
-def _do_query(text: str, cfg: Config, client: Client) -> None:
+def _do_query(text: str, cfg: Config, client: Client) -> str:
     now = datetime.now().astimezone()
 
     due_rng = temporal.extract_due_range(text, now=now)
@@ -65,7 +85,7 @@ def _do_query(text: str, cfg: Config, client: Client) -> None:
             mems = store.list_due_in_range(client, cfg.user_id, start, end)
             answer = llm.summarize_due_window(mems, label, cfg)
         console.print(f"[bold]bot \u203a[/bold] {answer}")
-        return
+        return answer
 
     rng = temporal.extract_range(text, now=now)
     if rng:
@@ -74,13 +94,14 @@ def _do_query(text: str, cfg: Config, client: Client) -> None:
             mems = store.list_memories_in_range(client, cfg.user_id, start, end)
             answer = llm.summarize_window(mems, label, cfg)
         console.print(f"[bold]bot \u203a[/bold] {answer}")
-        return
+        return answer
 
     with console.status("[cyan]Thinking...[/cyan]"):
         embedding = embeddings.embed(text, cfg, task_type="RETRIEVAL_QUERY")
         results = store.search_memories(client, embedding, cfg.user_id, cfg.top_k)
         answer = llm.synthesize_answer(text, results, cfg)
     console.print(f"[bold]bot \u203a[/bold] {answer}")
+    return answer
 
 
 def _do_forget_natural(text: str, cfg: Config, client: Client) -> None:
@@ -125,24 +146,33 @@ def _do_forget_natural(text: str, cfg: Config, client: Client) -> None:
     console.print(f"[green]Forgotten — removed {deleted}.[/green]")
 
 
-def _dispatch(line: str, cfg: Config, client: Client) -> bool:
+def _dispatch(line: str, cfg: Config, client: Client, history: list[dict]) -> bool:
     line = line.strip()
     if not line:
         return True
 
     if not line.startswith("/"):
         try:
-            intent = router.route(line, cfg)
+            intent = router.route(line, cfg, history=history)
             if intent == "store":
-                _do_store(line, cfg, client)
+                row = _do_store(line, cfg, client)
+                if row:
+                    history.append({"role": "user", "content": line})
+                    history.append({"role": "assistant", "content": llm.save_ack()})
             elif intent == "general":
                 with console.status("[cyan]Thinking...[/cyan]"):
                     reply = llm.chat_general(line, cfg)
                 console.print(f"[bold]bot \u203a[/bold] {reply}")
+                history.append({"role": "user", "content": line})
+                history.append({"role": "assistant", "content": reply})
             elif intent == "forget":
                 _do_forget_natural(line, cfg, client)
+                # Forget is an interactive two-step dialog; don't append
+                # assistant turns that would break follow-up routing.
             else:
-                _do_query(line, cfg, client)
+                answer = _do_query(line, cfg, client)
+                history.append({"role": "user", "content": line})
+                history.append({"role": "assistant", "content": answer})
         except Exception as exc:
             console.print(f"[red]Error:[/red] {exc}")
         return True
@@ -169,7 +199,7 @@ def _dispatch(line: str, cfg: Config, client: Client) -> bool:
             console.print("[dim]Usage: /add <text>[/dim]")
             return True
         try:
-            _do_store(arg, cfg, client)
+            _do_store(arg, cfg, client, force=True)
         except Exception as exc:
             console.print(f"[red]Error saving memory:[/red] {exc}")
         return True
@@ -179,7 +209,9 @@ def _dispatch(line: str, cfg: Config, client: Client) -> bool:
             console.print("[dim]Usage: /ask <question>[/dim]")
             return True
         try:
-            _do_query(arg, cfg, client)
+            answer = _do_query(arg, cfg, client)
+            history.append({"role": "user", "content": arg})
+            history.append({"role": "assistant", "content": answer})
         except Exception as exc:
             console.print(f"[red]Error answering question:[/red] {exc}")
         return True
@@ -371,6 +403,9 @@ def main() -> None:
     console.print(f"[dim]Memories stored: {count}[/dim]")
     console.print("[dim]Type [bold]/help[/bold] for commands or [bold]/quit[/bold] to exit.[/dim]\n")
 
+    # Quick win: conversation history for follow-up routing.
+    _history: list[dict] = []
+
     while True:
         try:
             line = input("you \u203a ")
@@ -378,5 +413,5 @@ def main() -> None:
             console.print("\n[dim]Goodbye.[/dim]")
             break
 
-        if not _dispatch(line, cfg, client):
+        if not _dispatch(line, cfg, client, _history):
             break

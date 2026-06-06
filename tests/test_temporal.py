@@ -136,6 +136,42 @@ class TestExtractRange:
         _, _, label = extract_range("today and yesterday", now=_NOW)
         assert label == "today"
 
+    # --- Exact calendar dates via dateparser ---
+    def test_day_month_ordinal_created_at(self):
+        s, e, label = extract_range("what did I save on 6th June?", now=_NOW)
+        assert label == "on June 06, 2024"
+        assert s == _utc(2024, 6, 6)
+        assert e == _utc(2024, 6, 7)
+
+    def test_month_day_created_at(self):
+        s, e, label = extract_range("what did I save June 6?", now=_NOW)
+        assert label == "on June 06, 2024"
+        assert s == _utc(2024, 6, 6)
+        assert e == _utc(2024, 6, 7)
+
+    def test_slash_date_created_at(self):
+        s, e, label = extract_range("what did I save on 15/06/2024?", now=_NOW)
+        assert label == "on June 15, 2024"
+        assert s == _utc(2024, 6, 15)
+        assert e == _utc(2024, 6, 16)
+
+    def test_dash_date_us_created_at(self):
+        s, e, label = extract_range("what did I save on 06-15-2024?", now=_NOW)
+        assert label == "on June 15, 2024"
+        assert s == _utc(2024, 6, 15)
+        assert e == _utc(2024, 6, 16)
+
+    def test_date_range_created_at(self):
+        s, e, label = extract_range("what did I save from June 1 to June 15?", now=_NOW)
+        assert s == _utc(2024, 6, 1)
+        assert e == _utc(2024, 6, 16)
+
+    def test_day_of_month_with_of_created_at(self):
+        s, e, label = extract_range("what did I save on the 10th of July?", now=_NOW)
+        assert label == "on July 10, 2024"
+        assert s == _utc(2024, 7, 10)
+        assert e == _utc(2024, 7, 11)
+
 
 # ---------------------------------------------------------------------------
 # extract_due_range — filters on due_at (when is it *due*)
@@ -234,6 +270,19 @@ class TestExtractDueRange:
         # The key requirement is that "what did I save today?" returns None.
         # We test only the clear negative case:
         assert extract_due_range("what did I save today?", now=_NOW) is None
+
+    # --- Exact calendar dates via dateparser ---
+    def test_due_on_exact_date(self):
+        s, e, label = extract_due_range("what's due on 6th June?", now=_NOW)
+        assert label == "on June 06, 2024"
+        assert s == _utc(2024, 6, 6)
+        assert e == _utc(2024, 6, 7)
+
+    def test_due_exact_date(self):
+        s, e, label = extract_due_range("deadlines for June 15", now=_NOW)
+        assert s == _utc(2024, 6, 15)
+        assert e == _utc(2024, 6, 16)
+        assert label == "on June 15, 2024"
 
 
 # ---------------------------------------------------------------------------
@@ -401,3 +450,47 @@ class TestExtractDue:
         # "nowadays" should not match "today"
         result = extract_due("nowadays things are different", now=_NOW)
         assert result is None
+
+    # --- Exact calendar dates via dateparser ---
+    def test_day_month_ordinal(self):
+        result = extract_due("submit report 6th June", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2024, 6, 6).date()
+
+    def test_month_day_ordinal_with_time(self):
+        result = extract_due("meeting on June 15th at 3pm", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2024, 6, 15).date()
+        assert result.hour == 15
+
+    def test_slash_date(self):
+        result = extract_due("deadline 15/06/2025", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2025, 6, 15).date()
+
+    def test_dash_date_us(self):
+        result = extract_due("birthday 06-15-2025", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2025, 6, 15).date()
+
+    def test_day_of_month_with_of(self):
+        result = extract_due("call mom on the 10th of July", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2024, 7, 10).date()
+
+    def test_bare_day_month(self):
+        result = extract_due("due 6 June", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2024, 6, 6).date()
+
+    def test_exact_date_past_wraps_year(self):
+        # January 15 is past relative to June 5 → should wrap to 2025
+        result = extract_due("submit January 15", now=_NOW)
+        assert result is not None
+        assert result.year == 2025
+
+    def test_exact_date_with_time_am(self):
+        result = extract_due("meeting June 10 at 9am", now=_NOW)
+        assert result is not None
+        assert result.date() == datetime(2024, 6, 10).date()
+        assert result.hour == 9
