@@ -13,7 +13,7 @@ _MONTH_MAP = {
     "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 _MONTH_NAMES_RE = re.compile(
-    r"\b(" + "|".join(sorted(_MONTH_MAP.keys(), key=len, reverse=True)) + r")\s+(\d{1,2})\b",
+    r"\b(" + "|".join(sorted(_MONTH_MAP.keys(), key=len, reverse=True)) + r")\s+(\d{1,2})(?:st|nd|rd|th)?\b",
     re.IGNORECASE,
 )
 _WEEKDAYS = {
@@ -293,6 +293,7 @@ def extract_due(text: str, tz: str | None = None, now: datetime | None = None) -
             except ValueError:
                 due = None
             if due is not None:
+                due = _apply_time(due, lower)
                 if due <= now:
                     try:
                         due = due.replace(year=due.year + 1)
