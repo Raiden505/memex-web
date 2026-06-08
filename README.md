@@ -1,6 +1,6 @@
-# Recall — Personal memory assistant
+# Memex — Personal memory assistant
 
-Recall is a personal "second brain": a CLI-first app (with an optional web frontend and API) that saves short personal memories and answers questions using semantic search + LLM synthesis.
+Memex is a personal "second brain": a CLI-first app (with an optional web frontend and API) that saves short personal memories and answers questions using semantic search + LLM synthesis.
 
 - Store facts, notes, links or short logs in natural language.
 - Ask follow-up questions later; Recall retrieves relevant memories with vector search and composes answers with a chat model.
